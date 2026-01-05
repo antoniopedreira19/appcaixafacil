@@ -1,0 +1,82 @@
+{
+  "name": "Transaction",
+  "type": "object",
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Data da transa\u00e7\u00e3o"
+    },
+    "description": {
+      "type": "string",
+      "description": "Descri\u00e7\u00e3o da transa\u00e7\u00e3o"
+    },
+    "amount": {
+      "type": "number",
+      "description": "Valor da transa\u00e7\u00e3o (positivo para entrada, negativo para sa\u00edda)"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "income",
+        "expense"
+      ],
+      "description": "Tipo da transa\u00e7\u00e3o"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "vendas",
+        "servicos",
+        "investimentos",
+        "emprestimos_recebidos",
+        "outras_receitas",
+        "salarios_funcionarios",
+        "fornecedores",
+        "aluguel",
+        "contas_servicos",
+        "impostos_taxas",
+        "marketing_publicidade",
+        "equipamentos_materiais",
+        "manutencao",
+        "combustivel_transporte",
+        "emprestimos_pagos",
+        "outras_despesas"
+      ],
+      "description": "Categoria da transa\u00e7\u00e3o"
+    },
+    "payment_method": {
+      "type": "string",
+      "enum": [
+        "dinheiro",
+        "pix",
+        "cartao_credito",
+        "cartao_debito",
+        "transferencia",
+        "boleto",
+        "cheque"
+      ],
+      "description": "Forma de pagamento"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Observa\u00e7\u00f5es adicionais"
+    },
+    "recurring": {
+      "type": "boolean",
+      "default": false,
+      "description": "Indica se \u00e9 uma transa\u00e7\u00e3o recorrente"
+    },
+    "bank_account": {
+      "type": "string",
+      "description": "Conta banc\u00e1ria relacionada"
+    }
+  },
+  "required": [
+    "date",
+    "description",
+    "amount",
+    "type",
+    "category"
+  ]
+}

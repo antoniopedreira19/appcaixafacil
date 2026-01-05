@@ -1,0 +1,49 @@
+{
+  "name": "ContentArticle",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "T\u00edtulo do artigo"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Resumo do artigo"
+    },
+    "content": {
+      "type": "string",
+      "description": "Conte\u00fado completo do artigo em markdown"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "fluxo_caixa",
+        "planejamento",
+        "impostos",
+        "credito",
+        "investimento",
+        "gestao"
+      ],
+      "description": "Categoria do conte\u00fado"
+    },
+    "reading_time": {
+      "type": "number",
+      "description": "Tempo estimado de leitura em minutos"
+    },
+    "image_url": {
+      "type": "string",
+      "description": "URL da imagem de capa"
+    },
+    "published": {
+      "type": "boolean",
+      "default": true,
+      "description": "Se o artigo est\u00e1 publicado"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "content",
+    "category"
+  ]
+}
