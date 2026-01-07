@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { FileText, Download, Mail, Calendar } from "lucide-react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function ReportGenerator() {
@@ -36,7 +36,7 @@ export default function ReportGenerator() {
         payload.endDate = customDates.endDate;
       }
 
-      const response = await base44.functions.invoke('generateFinancialReport', payload);
+      const { data: response, error } = await supabase.functions.invoke('generateFinancialReport', { body: payload });
 
       if (actionType === 'email') {
         setSuccess(true);
