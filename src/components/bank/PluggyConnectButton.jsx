@@ -72,7 +72,6 @@ export default function PluggyConnectButton({ onSuccess }) {
             const script = document.createElement('script');
             script.src = url;
             script.async = true;
-            script.crossOrigin = 'anonymous';
 
             const timeout = setTimeout(() => {
               reject(new Error('Timeout'));
