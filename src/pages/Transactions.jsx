@@ -60,6 +60,7 @@ export default function Transactions() {
   const [open, setOpen] = useState(false);
   const [filterType, setFilterType] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  const [filterAccount, setFilterAccount] = useState("all");
   
   const [formData, setFormData] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -77,6 +78,19 @@ export default function Transactions() {
         .from('transactions')
         .select('*')
         .order('date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    initialData: [],
+  });
+
+  const { data: accounts } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('*')
+        .order('name', { ascending: true });
       if (error) throw error;
       return data || [];
     },
@@ -152,8 +166,13 @@ export default function Transactions() {
   ];
 
   const filteredTransactions = transactions.filter(t => {
-    if (filterType !== "all" && t.type !== filterType) return false;
+    const isIncome = t.type === "income" || t.type === "CREDIT" || t.amount > 0;
+    const isExpense = t.type === "expense" || t.type === "DEBIT" || t.amount < 0;
+    
+    if (filterType === "income" && !isIncome) return false;
+    if (filterType === "expense" && !isExpense) return false;
     if (filterCategory !== "all" && t.category !== filterCategory) return false;
+    if (filterAccount !== "all" && t.account_id !== filterAccount) return false;
     return true;
   });
 
@@ -289,6 +308,20 @@ export default function Transactions() {
               <SelectItem value="all">Todas as categorias</SelectItem>
               {Object.entries(CATEGORY_NAMES).map(([value, label]) => (
                 <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={filterAccount} onValueChange={setFilterAccount}>
+            <SelectTrigger className="md:w-64">
+              <SelectValue placeholder="Conta" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as contas</SelectItem>
+              {accounts.map((account) => (
+                <SelectItem key={account.id} value={account.pluggy_account_id || account.id}>
+                  {account.name || "Conta sem nome"}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
