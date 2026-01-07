@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, Building2, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const N8N_TOKEN_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/get-pluggy-token';
+const N8N_TOKEN_WEBHOOK = "https://grifoworkspace.app.n8n.cloud/webhook/get-pluggy-token";
 
 const isInIframe = () => {
   try {
     // Verifica se está em iframe E se é o preview do Lovable
     const inIframe = window.self !== window.top;
-    const isLovablePreview = window.location.hostname.includes('lovableproject.com');
+    const isLovablePreview = window.location.hostname.includes("lovableproject.com");
     return inIframe && isLovablePreview;
   } catch {
     return true;
@@ -17,8 +17,9 @@ const isInIframe = () => {
 };
 
 const openInNewTab = () => {
-  window.open(window.location.href, '_blank', 'noopener,noreferrer');
+  window.open(window.location.href, "_blank", "noopener,noreferrer");
 };
+
 export default function PluggyConnectButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -40,82 +41,64 @@ export default function PluggyConnectButton({ onSuccess }) {
 
     try {
       if (isInIframe()) {
-        throw new Error('O Pluggy não carrega no preview (iframe). Abra em nova aba ou publique o app.');
+        throw new Error("O Pluggy não carrega no preview (iframe). Abra em nova aba ou publique o app.");
       }
 
       // Se já existe, está pronto
       if (window.PluggyConnect) {
-        console.log('✅ PluggyConnect já disponível');
+        console.log("✅ PluggyConnect já disponível");
         setScriptReady(true);
         setLoadingScript(false);
         return;
       }
 
-      // Remove scripts antigos do Pluggy
-      document.querySelectorAll('script[src*="pluggy"]').forEach(s => s.remove());
+      // Remove scripts antigos do Pluggy para evitar conflitos
+      document.querySelectorAll('script[src*="pluggy"]').forEach((s) => s.remove());
 
-      console.log('📦 Carregando script Pluggy...');
+      console.log("📦 Carregando script Pluggy...");
 
-      // Tenta múltiplas URLs
-      const urls = [
-        'https://cdn.pluggy.ai/connect/v3/pluggy-connect.js',
-        'https://cdn.pluggy.ai/pluggy-connect/pluggy-connect.js'
-      ];
+      // URL CORRETA (Documentação Oficial)
+      const url = "https://cdn.pluggy.ai/pluggy-connect/latest/pluggy-connect.js";
 
-      let loaded = false;
+      await new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.async = true;
 
-      for (const url of urls) {
-        if (loaded) break;
-        
-        try {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = url;
-            script.async = true;
+        const timeout = setTimeout(() => {
+          reject(new Error("Timeout ao carregar script do Pluggy"));
+        }, 10000); // 10 segundos de timeout
 
-            const timeout = setTimeout(() => {
-              reject(new Error('Timeout'));
-            }, 8000);
+        script.onload = () => {
+          clearTimeout(timeout);
+          // Verifica se o objeto foi realmente injetado na janela
+          let attempts = 0;
+          const check = setInterval(() => {
+            attempts++;
+            if (window.PluggyConnect) {
+              clearInterval(check);
+              console.log("✅ Script do Pluggy carregado com sucesso!");
+              resolve();
+            } else if (attempts > 50) {
+              // 5 segundos tentando achar o objeto
+              clearInterval(check);
+              reject(new Error("Script carregou mas objeto PluggyConnect não está disponível"));
+            }
+          }, 100);
+        };
 
-            script.onload = () => {
-              clearTimeout(timeout);
-              let attempts = 0;
-              const check = setInterval(() => {
-                attempts++;
-                if (window.PluggyConnect) {
-                  clearInterval(check);
-                  loaded = true;
-                  resolve();
-                } else if (attempts > 30) {
-                  clearInterval(check);
-                  reject(new Error('Objeto não disponível'));
-                }
-              }, 100);
-            };
+        script.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("Erro de rede ao baixar o script do Pluggy"));
+        };
 
-            script.onerror = () => {
-              clearTimeout(timeout);
-              reject(new Error('Erro de rede'));
-            };
-
-            document.head.appendChild(script);
-          });
-          
-          console.log('✅ Script carregado de:', url);
-          loaded = true;
-        } catch (e) {
-          console.warn('❌ Falha em:', url, e.message);
-        }
-      }
-
-      if (!loaded) {
-        throw new Error('Não foi possível carregar o Pluggy. Se estiver no preview, abra em nova aba; caso contrário, desative bloqueadores de anúncios ou use aba anônima.');
-      }
+        document.head.appendChild(script);
+      });
 
       setScriptReady(true);
     } catch (err) {
-      console.error('Erro ao carregar Pluggy:', err);
-      setError(err.message || 'Falha ao carregar script');
+      console.error("Erro ao carregar Pluggy:", err);
+      setError(err.message || "Falha ao carregar script");
     } finally {
       setLoadingScript(false);
     }
@@ -126,59 +109,60 @@ export default function PluggyConnectButton({ onSuccess }) {
     setError(null);
 
     try {
-      console.log('🔑 Buscando token via n8n...');
+      console.log("🔑 Buscando token via n8n...");
       const response = await fetch(N8N_TOKEN_WEBHOOK, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
       });
 
       if (!response.ok) {
-        throw new Error('Erro ao obter token do n8n');
+        throw new Error("Erro ao obter token do n8n");
       }
 
       const data = await response.json();
-      const connectToken = data.accessToken;
+      const connectToken = data.accessToken; // Certifique-se que seu n8n retorna { "accessToken": "..." }
 
       if (!connectToken) {
-        throw new Error('Token não retornado pelo n8n');
+        throw new Error("Token não retornado pelo n8n");
       }
-      console.log('✅ Token obtido via n8n');
+      console.log("✅ Token obtido via n8n");
 
       if (!scriptReady) {
         await loadPluggyScript();
       }
 
+      // Verificação final antes de instanciar
       if (!window.PluggyConnect) {
         throw new Error(
           isInIframe()
-            ? 'O Pluggy não abre no preview (iframe). Abra em nova aba ou publique o app.'
-            : 'Pluggy não carregou. Tente novamente.'
+            ? "O Pluggy não abre no preview (iframe). Abra em nova aba ou publique o app."
+            : "Pluggy não carregou corretamente. Tente recarregar a página.",
         );
       }
 
       const pluggy = new window.PluggyConnect({
         connectToken,
-        includeSandbox: false,
+        includeSandbox: true, // Mude para false em produção se desejar
         onSuccess: (itemData) => {
-          console.log('✅ Conexão realizada!', itemData);
+          console.log("✅ Conexão realizada!", itemData);
           setLoading(false);
-          onSuccess?.(itemData);
+          if (onSuccess) onSuccess(itemData);
         },
         onError: (err) => {
-          console.error('❌ Erro no widget:', err);
-          setError('Erro ao conectar banco');
+          console.error("❌ Erro no widget:", err);
+          setError("Erro ao conectar banco. Tente novamente.");
           setLoading(false);
         },
         onClose: () => {
-          console.log('🚪 Widget fechado');
+          console.log("🚪 Widget fechado");
           setLoading(false);
         },
       });
 
       pluggy.init();
     } catch (err) {
-      console.error('❌ Erro:', err);
-      setError(err?.message || 'Erro desconhecido');
+      console.error("❌ Erro:", err);
+      setError(err?.message || "Erro desconhecido");
       setLoading(false);
     }
   };
@@ -194,7 +178,7 @@ export default function PluggyConnectButton({ onSuccess }) {
         {loadingScript ? (
           <>
             <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-            Carregando...
+            Carregando Script...
           </>
         ) : loading ? (
           <>
@@ -216,22 +200,12 @@ export default function PluggyConnectButton({ onSuccess }) {
           </Alert>
 
           {isInIframe() && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={openInNewTab}
-              className="w-full"
-            >
+            <Button variant="outline" size="sm" onClick={openInNewTab} className="w-full">
               Abrir em nova aba
             </Button>
           )}
 
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={loadPluggyScript}
-            className="w-full"
-          >
+          <Button variant="outline" size="sm" onClick={loadPluggyScript} className="w-full">
             <RefreshCw className="w-4 h-4 mr-2" />
             Tentar Novamente
           </Button>
