@@ -192,7 +192,8 @@ export default function Dashboard() {
 
     // Soma das transações que aconteceram DEPOIS (para subtrair do saldo atual)
     const changeAfterPeriod = transactionsAfterPeriod.reduce((sum, t) => {
-      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
+      const isIncome = t.type === "income" || t.type === "CREDIT" || t.amount > 0;
+      return sum + (isIncome ? Math.abs(t.amount) : -Math.abs(t.amount));
     }, 0);
 
     const final = currentBalanceReal - changeAfterPeriod;
@@ -206,7 +207,8 @@ export default function Dashboard() {
     });
 
     const changeInPeriod = transactionsInPeriod.reduce((sum, t) => {
-      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
+      const isIncome = t.type === "income" || t.type === "CREDIT" || t.amount > 0;
+      return sum + (isIncome ? Math.abs(t.amount) : -Math.abs(t.amount));
     }, 0);
 
     const initial = final - changeInPeriod;
@@ -227,10 +229,12 @@ export default function Dashboard() {
   }, [transactions, selectedAccount, periodStart, periodEnd, customPeriod, selectedMonth, bankConnections]);
 
   const monthStats = useMemo(() => {
-    const income = filteredTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
+    const income = filteredTransactions
+      .filter((t) => t.type === "income" || t.type === "CREDIT" || t.amount > 0)
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
     const expense = filteredTransactions
-      .filter((t) => t.type === "expense")
+      .filter((t) => t.type === "expense" || t.type === "DEBIT" || t.amount < 0)
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
     // O "balance" aqui é apenas o Resultado do Mês (Receita - Despesa)
@@ -257,11 +261,11 @@ export default function Dashboard() {
   };
 
   const incomeTransactions = useMemo(
-    () => filteredTransactions.filter((t) => t.type === "income"),
+    () => filteredTransactions.filter((t) => t.type === "income" || t.type === "CREDIT" || t.amount > 0),
     [filteredTransactions],
   );
   const expenseTransactions = useMemo(
-    () => filteredTransactions.filter((t) => t.type === "expense"),
+    () => filteredTransactions.filter((t) => t.type === "expense" || t.type === "DEBIT" || t.amount < 0),
     [filteredTransactions],
   );
 
