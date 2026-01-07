@@ -33,6 +33,7 @@ export default function Dashboard() {
   });
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
 
+  // Busca transações
   const { data: transactions, isLoading: loadingTransactions } = useQuery({
     queryKey: ["transactions"],
     queryFn: async () => {
@@ -43,7 +44,7 @@ export default function Dashboard() {
     initialData: [],
   });
 
-  // Query que busca as contas (nome, saldo atual, etc)
+  // Busca contas bancárias (incluindo saldo atualizado)
   const { data: bankConnections, isLoading: loadingConnections } = useQuery({
     queryKey: ["bank-connections"],
     queryFn: async () => {
@@ -109,9 +110,6 @@ export default function Dashboard() {
     return options;
   }, []);
 
-  // CORREÇÃO: Removemos a lógica antiga que gerava apenas uma lista de IDs (strings).
-  // Agora usamos 'bankConnections' diretamente, pois ele contém os objetos completos da conta.
-
   const { filteredTransactions, periodStart, periodEnd } = useMemo(() => {
     let start, end;
 
@@ -132,7 +130,7 @@ export default function Dashboard() {
     const filtered = transactions.filter((t) => {
       const date = new Date(t.date);
       const dateMatch = date >= start && date <= end;
-      // Filtra usando ID da conta (seja pelo id interno ou bank_account/account_id)
+      // Compatibilidade com diferentes nomes de coluna para ID da conta
       const accountMatch =
         selectedAccount === "all" || t.account_id === selectedAccount || t.bank_account === selectedAccount;
       return dateMatch && accountMatch;
@@ -141,16 +139,23 @@ export default function Dashboard() {
     return { filteredTransactions: filtered, periodStart: start, periodEnd: end };
   }, [transactions, selectedMonth, selectedAccount, customPeriod]);
 
+  // CORREÇÃO CRÍTICA: Saldo Total agora vem direto do banco de dados (bankConnections)
+  // e não da soma de transações, corrigindo o erro de valor negativo gigante.
   const totalBalance = useMemo(() => {
-    const filteredByAccount =
-      selectedAccount === "all"
-        ? transactions
-        : transactions.filter((t) => t.account_id === selectedAccount || t.bank_account === selectedAccount);
+    if (loadingConnections) return 0;
 
-    return filteredByAccount.reduce((sum, t) => {
-      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
-    }, 0);
-  }, [transactions, selectedAccount]);
+    if (selectedAccount === "all") {
+      return bankConnections.reduce((acc, account) => {
+        return acc + (Number(account.balance) || 0);
+      }, 0);
+    }
+
+    const account = bankConnections.find(
+      (a) => a.id === selectedAccount || a.pluggy_account_id === selectedAccount || a.account_id === selectedAccount,
+    );
+
+    return account ? Number(account.balance) || 0 : 0;
+  }, [bankConnections, selectedAccount, loadingConnections]);
 
   const { initialBalance, finalBalance, periodLabel } = useMemo(() => {
     const filteredByAccount =
@@ -230,8 +235,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-3 md:p-4 space-y-3">
-      {/* CORREÇÃO: Passando bankConnections para a prop 'accounts'. 
-          O componente espera a lista de objetos, não de IDs. */}
+      {/* CORREÇÃO: Passando bankConnections para a prop 'accounts' */}
       <AccountBalance
         balance={totalBalance}
         selectedAccount={selectedAccount}
@@ -317,8 +321,7 @@ export default function Dashboard() {
             </Alert>
           )}
 
-          {/* CORREÇÃO: Adicionado a prop accounts={bankConnections}.
-              O gráfico precisa saber o saldo atual das contas para fazer o cálculo reverso corretamente. */}
+          {/* CORREÇÃO: Passando bankConnections para a prop 'accounts' */}
           {transactions.length > 0 && <CashBalanceEvolution transactions={transactions} accounts={bankConnections} />}
 
           <RecentTransactions transactions={transactions} />
