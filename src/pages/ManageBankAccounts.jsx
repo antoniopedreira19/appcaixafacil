@@ -12,8 +12,10 @@ import {
   Edit2, 
   CheckCircle, 
   AlertCircle,
-  Loader2 
+  Loader2,
+  Plus
 } from "lucide-react";
+import PluggyConnectButton from "@/components/bank/PluggyConnectButton";
 
 export default function ManageBankAccounts() {
   const queryClient = useQueryClient();
@@ -117,20 +119,25 @@ export default function ManageBankAccounts() {
 
   return (
     <div className="p-6 md:p-8 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">
-          Gerenciar Contas Bancárias
-        </h1>
-        <p className="text-slate-600">
-          Renomeie suas contas bancárias para melhor organização
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">
+            Gerenciar Contas Bancárias
+          </h1>
+          <p className="text-slate-600">
+            Conecte seus bancos ou renomeie suas contas para melhor organização
+          </p>
+        </div>
+        <PluggyConnectButton 
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ['transactions'] })}
+        />
       </div>
 
       <Alert className="border-blue-200 bg-blue-50">
         <AlertCircle className="h-4 w-4 text-blue-600" />
         <AlertDescription className="text-blue-900">
-          <strong>Dica:</strong> Use nomes claros como "Banco 1", "Banco 2" ou o nome real do banco (ex: "Nubank", "C6 Bank").
-          Todas as transações dessa conta serão atualizadas automaticamente.
+          <strong>Dica:</strong> Conecte sua conta bancária via Pluggy para importar transações automaticamente, 
+          ou use nomes claros como "Banco 1", "Nubank" para organizar manualmente.
         </AlertDescription>
       </Alert>
 
