@@ -1,6 +1,7 @@
-import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -13,7 +14,18 @@ import {
   Repeat,
   Menu, 
   Bell,
+  LogOut,
+  User,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Sidebar,
   SidebarContent,
@@ -86,13 +98,15 @@ const navigationItems = [
   },
 ];
 
-function SidebarContentComponent() {
+function SidebarContentComponent({ user, onLogout }) {
   const location = useLocation();
   const { setOpenMobile } = useSidebar();
 
   const handleLinkClick = () => {
     setOpenMobile(false);
   };
+
+  const userInitials = user?.email?.substring(0, 2).toUpperCase() || "U";
 
   return (
     <>
@@ -142,7 +156,33 @@ function SidebarContentComponent() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-slate-200 p-4">
+      <SidebarFooter className="border-t border-slate-200 p-4 space-y-4">
+        {user && (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Avatar className="w-8 h-8">
+                <AvatarFallback className="bg-blue-100 text-blue-700 text-xs">
+                  {userInitials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-slate-900 truncate">
+                  {user.email}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onLogout}
+              className="text-slate-500 hover:text-red-600 hover:bg-red-50"
+              title="Sair"
+            >
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
+        
         <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-xl p-4 border border-orange-200">
           <div className="flex items-center gap-2 mb-2">
             <Repeat className="w-4 h-4 text-orange-600" />
@@ -158,6 +198,30 @@ function SidebarContentComponent() {
 }
 
 export default function Layout({ children, currentPageName }) {
+  const [user, setUser] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (!session) {
+        navigate("/Auth");
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="min-h-screen flex w-full bg-gradient-to-br from-slate-50 to-slate-100">
@@ -173,26 +237,53 @@ export default function Layout({ children, currentPageName }) {
         `}</style>
         
         <Sidebar className="border-r border-slate-200 bg-white">
-          <SidebarContentComponent />
+          <SidebarContentComponent user={user} onLogout={handleLogout} />
         </Sidebar>
 
         <SidebarInset className="flex-1 flex flex-col overflow-hidden">
           {/* Header mobile - Botão de menu melhorado */}
           <header className="bg-white border-b border-slate-200 px-4 py-3 md:hidden sticky top-0 z-10 flex-shrink-0">
-            <div className="flex items-center gap-3">
-              {/* Botão de menu destacado e maior */}
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg p-2 hover:shadow-xl transition-all active:scale-95">
-                <SidebarTrigger className="text-white hover:bg-transparent">
-                  <Menu className="w-6 h-6" />
-                </SidebarTrigger>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-                  <TrendingUp className="w-4 h-4 text-white" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* Botão de menu destacado e maior */}
+                <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl shadow-lg p-2 hover:shadow-xl transition-all active:scale-95">
+                  <SidebarTrigger className="text-white hover:bg-transparent">
+                    <Menu className="w-6 h-6" />
+                  </SidebarTrigger>
                 </div>
-                <h1 className="text-lg font-bold text-slate-900">CaixaFácil</h1>
+                
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-white" />
+                  </div>
+                  <h1 className="text-lg font-bold text-slate-900">CaixaFácil</h1>
+                </div>
               </div>
+
+              {/* User menu mobile */}
+              {user && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="rounded-full">
+                      <Avatar className="w-8 h-8">
+                        <AvatarFallback className="bg-blue-100 text-blue-700 text-xs">
+                          {user.email?.substring(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <div className="px-2 py-1.5">
+                      <p className="text-sm font-medium">{user.email}</p>
+                    </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sair
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           </header>
 
