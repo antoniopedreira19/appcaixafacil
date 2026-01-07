@@ -28,31 +28,26 @@ export default function Dashboard() {
   const [expandedCard, setExpandedCard] = useState(null);
   const [customPeriod, setCustomPeriod] = useState(null);
   const [tempCustomPeriod, setTempCustomPeriod] = useState({
-    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+    startDate: format(startOfMonth(new Date()), "yyyy-MM-dd"),
+    endDate: format(endOfMonth(new Date()), "yyyy-MM-dd"),
   });
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
 
   const { data: transactions, isLoading: loadingTransactions } = useQuery({
-    queryKey: ['transactions'],
+    queryKey: ["transactions"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('date', { ascending: false });
+      const { data, error } = await supabase.from("transactions").select("*").order("date", { ascending: false });
       if (error) throw error;
       return data || [];
     },
     initialData: [],
   });
 
+  // Query que busca as contas (nome, saldo atual, etc)
   const { data: bankConnections, isLoading: loadingConnections } = useQuery({
-    queryKey: ['bank-connections'],
+    queryKey: ["bank-connections"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('accounts')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data, error } = await supabase.from("accounts").select("*").order("created_at", { ascending: false });
       if (error) throw error;
       return data || [];
     },
@@ -60,9 +55,11 @@ export default function Dashboard() {
   });
 
   const { data: user } = useQuery({
-    queryKey: ['user'],
+    queryKey: ["user"],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       return user;
     },
   });
@@ -70,57 +67,50 @@ export default function Dashboard() {
   const isLoading = loadingTransactions || loadingConnections;
 
   const handleRefreshData = () => {
-    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
+    queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    queryClient.invalidateQueries({ queryKey: ["bank-connections"] });
   };
 
   const monthOptions = useMemo(() => {
     const options = [];
     const currentYear = new Date().getFullYear();
-    
+
     options.push({
       value: `year_${currentYear}`,
       label: `📅 Ano Completo ${currentYear}`,
       date: null,
       isYear: true,
-      year: currentYear
+      year: currentYear,
     });
-    
+
     options.push({
       value: `year_${currentYear - 1}`,
       label: `📅 Ano Completo ${currentYear - 1}`,
       date: null,
       isYear: true,
-      year: currentYear - 1
+      year: currentYear - 1,
     });
-    
+
     for (let i = 0; i < 12; i++) {
       const date = subMonths(new Date(), i);
       options.push({
         value: i.toString(),
         label: format(date, "MMMM 'de' yyyy", { locale: ptBR }),
-        date: date
+        date: date,
       });
     }
-    
+
     options.push({
-      value: 'custom',
-      label: '🎯 Personalizar período...',
-      date: null
+      value: "custom",
+      label: "🎯 Personalizar período...",
+      date: null,
     });
-    
+
     return options;
   }, []);
 
-  const accounts = useMemo(() => {
-    const accountSet = new Set();
-    transactions.forEach(t => {
-      if (t.account_id) {
-        accountSet.add(t.account_id);
-      }
-    });
-    return Array.from(accountSet);
-  }, [transactions]);
+  // CORREÇÃO: Removemos a lógica antiga que gerava apenas uma lista de IDs (strings).
+  // Agora usamos 'bankConnections' diretamente, pois ele contém os objetos completos da conta.
 
   const { filteredTransactions, periodStart, periodEnd } = useMemo(() => {
     let start, end;
@@ -128,8 +118,8 @@ export default function Dashboard() {
     if (customPeriod) {
       start = startOfDay(new Date(customPeriod.startDate));
       end = endOfDay(new Date(customPeriod.endDate));
-    } else if (selectedMonth.startsWith('year_')) {
-      const year = parseInt(selectedMonth.replace('year_', ''));
+    } else if (selectedMonth.startsWith("year_")) {
+      const year = parseInt(selectedMonth.replace("year_", ""));
       start = startOfYear(new Date(year, 0, 1));
       end = endOfYear(new Date(year, 11, 31));
     } else {
@@ -139,10 +129,12 @@ export default function Dashboard() {
       end = endOfMonth(selectedDate);
     }
 
-    const filtered = transactions.filter(t => {
+    const filtered = transactions.filter((t) => {
       const date = new Date(t.date);
       const dateMatch = date >= start && date <= end;
-      const accountMatch = selectedAccount === "all" || t.account_id === selectedAccount;
+      // Filtra usando ID da conta (seja pelo id interno ou bank_account/account_id)
+      const accountMatch =
+        selectedAccount === "all" || t.account_id === selectedAccount || t.bank_account === selectedAccount;
       return dateMatch && accountMatch;
     });
 
@@ -150,51 +142,51 @@ export default function Dashboard() {
   }, [transactions, selectedMonth, selectedAccount, customPeriod]);
 
   const totalBalance = useMemo(() => {
-    const filteredByAccount = selectedAccount === "all" 
-      ? transactions 
-      : transactions.filter(t => t.account_id === selectedAccount);
-    
+    const filteredByAccount =
+      selectedAccount === "all"
+        ? transactions
+        : transactions.filter((t) => t.account_id === selectedAccount || t.bank_account === selectedAccount);
+
     return filteredByAccount.reduce((sum, t) => {
-      return sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount));
+      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
     }, 0);
   }, [transactions, selectedAccount]);
 
   const { initialBalance, finalBalance, periodLabel } = useMemo(() => {
-    const filteredByAccount = selectedAccount === "all" 
-      ? transactions 
-      : transactions.filter(t => t.account_id === selectedAccount);
-    
+    const filteredByAccount =
+      selectedAccount === "all"
+        ? transactions
+        : transactions.filter((t) => t.account_id === selectedAccount || t.bank_account === selectedAccount);
+
     const initial = filteredByAccount
-      .filter(t => new Date(t.date) < periodStart)
-      .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount)), 0);
-    
+      .filter((t) => new Date(t.date) < periodStart)
+      .reduce((sum, t) => sum + (t.type === "income" ? t.amount : -Math.abs(t.amount)), 0);
+
     const final = filteredByAccount
-      .filter(t => new Date(t.date) <= periodEnd)
-      .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount)), 0);
-    
+      .filter((t) => new Date(t.date) <= periodEnd)
+      .reduce((sum, t) => sum + (t.type === "income" ? t.amount : -Math.abs(t.amount)), 0);
+
     let label;
     if (customPeriod) {
       const startFormatted = format(periodStart, "MMM/yy", { locale: ptBR });
       const endFormatted = format(periodEnd, "MMM/yy", { locale: ptBR });
       label = startFormatted === endFormatted ? startFormatted : `${startFormatted} a ${endFormatted}`;
-    } else if (selectedMonth.startsWith('year_')) {
-      label = `Ano ${selectedMonth.replace('year_', '')}`;
+    } else if (selectedMonth.startsWith("year_")) {
+      label = `Ano ${selectedMonth.replace("year_", "")}`;
     } else {
       label = format(periodStart, "MMM/yy", { locale: ptBR });
     }
-    
+
     return { initialBalance: initial, finalBalance: final, periodLabel: label };
   }, [transactions, selectedAccount, periodStart, periodEnd, customPeriod, selectedMonth]);
 
   const monthStats = useMemo(() => {
-    const income = filteredTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
-    
+    const income = filteredTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
+
     const expense = filteredTransactions
-      .filter(t => t.type === 'expense')
+      .filter((t) => t.type === "expense")
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-    
+
     return { income, expense, balance: income - expense };
   }, [filteredTransactions]);
 
@@ -203,7 +195,7 @@ export default function Dashboard() {
   };
 
   const handleMonthChange = (value) => {
-    if (value === 'custom') {
+    if (value === "custom") {
       setCustomDialogOpen(true);
     } else {
       setCustomPeriod(null);
@@ -213,12 +205,18 @@ export default function Dashboard() {
 
   const handleApplyCustomPeriod = () => {
     setCustomPeriod(tempCustomPeriod);
-    setSelectedMonth('custom');
+    setSelectedMonth("custom");
     setCustomDialogOpen(false);
   };
 
-  const incomeTransactions = useMemo(() => filteredTransactions.filter(t => t.type === 'income'), [filteredTransactions]);
-  const expenseTransactions = useMemo(() => filteredTransactions.filter(t => t.type === 'expense'), [filteredTransactions]);
+  const incomeTransactions = useMemo(
+    () => filteredTransactions.filter((t) => t.type === "income"),
+    [filteredTransactions],
+  );
+  const expenseTransactions = useMemo(
+    () => filteredTransactions.filter((t) => t.type === "expense"),
+    [filteredTransactions],
+  );
 
   if (isLoading) {
     return (
@@ -232,11 +230,13 @@ export default function Dashboard() {
 
   return (
     <div className="p-3 md:p-4 space-y-3">
+      {/* CORREÇÃO: Passando bankConnections para a prop 'accounts'. 
+          O componente espera a lista de objetos, não de IDs. */}
       <AccountBalance
         balance={totalBalance}
         selectedAccount={selectedAccount}
         onAccountChange={setSelectedAccount}
-        accounts={accounts}
+        accounts={bankConnections}
         showBalance={showBalance}
         onToggleBalance={() => setShowBalance(!showBalance)}
         transactions={transactions}
@@ -268,7 +268,7 @@ export default function Dashboard() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {monthOptions.map(option => (
+                {monthOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -284,8 +284,8 @@ export default function Dashboard() {
             initialBalance={initialBalance}
             finalBalance={finalBalance}
             periodLabel={periodLabel}
-            onClickIncome={() => handleToggleCard('income')}
-            onClickExpense={() => handleToggleCard('expense')}
+            onClickIncome={() => handleToggleCard("income")}
+            onClickExpense={() => handleToggleCard("expense")}
             expandedCard={expandedCard}
           >
             {{
@@ -304,7 +304,7 @@ export default function Dashboard() {
                   onClose={() => setExpandedCard(null)}
                   allTransactions={transactions}
                 />
-              )
+              ),
             }}
           </MonthSummaryCards>
 
@@ -317,7 +317,9 @@ export default function Dashboard() {
             </Alert>
           )}
 
-          {transactions.length > 0 && <CashBalanceEvolution transactions={transactions} />}
+          {/* CORREÇÃO: Adicionado a prop accounts={bankConnections}.
+              O gráfico precisa saber o saldo atual das contas para fazer o cálculo reverso corretamente. */}
+          {transactions.length > 0 && <CashBalanceEvolution transactions={transactions} accounts={bankConnections} />}
 
           <RecentTransactions transactions={transactions} />
         </TabsContent>
@@ -327,7 +329,7 @@ export default function Dashboard() {
             <TrendingUp className="w-4 h-4 text-blue-600" />
             <h2 className="text-lg font-bold text-slate-900">Análise Avançada</h2>
           </div>
-          
+
           {transactions.length === 0 ? (
             <Alert className="border-orange-200 bg-orange-50">
               <AlertCircle className="h-4 w-4 text-orange-600" />
