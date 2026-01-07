@@ -6,7 +6,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle, Calendar, TrendingUp, BarChart3 } from "lucide-react";
-import { format, subMonths, startOfMonth, endOfMonth, startOfDay, endOfDay, startOfYear, endOfYear } from "date-fns";
+import {
+  format,
+  subMonths,
+  startOfMonth,
+  endOfMonth,
+  startOfDay,
+  endOfDay,
+  startOfYear,
+  endOfYear,
+  isAfter,
+} from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +43,6 @@ export default function Dashboard() {
   });
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
 
-  // Busca transações
   const { data: transactions, isLoading: loadingTransactions } = useQuery({
     queryKey: ["transactions"],
     queryFn: async () => {
@@ -44,7 +53,6 @@ export default function Dashboard() {
     initialData: [],
   });
 
-  // Busca contas bancárias (incluindo saldo atualizado)
   const { data: bankConnections, isLoading: loadingConnections } = useQuery({
     queryKey: ["bank-connections"],
     queryFn: async () => {
@@ -130,7 +138,6 @@ export default function Dashboard() {
     const filtered = transactions.filter((t) => {
       const date = new Date(t.date);
       const dateMatch = date >= start && date <= end;
-      // Compatibilidade com diferentes nomes de coluna para ID da conta
       const accountMatch =
         selectedAccount === "all" || t.account_id === selectedAccount || t.bank_account === selectedAccount;
       return dateMatch && accountMatch;
@@ -139,8 +146,7 @@ export default function Dashboard() {
     return { filteredTransactions: filtered, periodStart: start, periodEnd: end };
   }, [transactions, selectedMonth, selectedAccount, customPeriod]);
 
-  // CORREÇÃO CRÍTICA: Saldo Total agora vem direto do banco de dados (bankConnections)
-  // e não da soma de transações, corrigindo o erro de valor negativo gigante.
+  // Lógica de Saldo Total (Direto do Banco de Dados)
   const totalBalance = useMemo(() => {
     if (loadingConnections) return 0;
 
@@ -157,20 +163,55 @@ export default function Dashboard() {
     return account ? Number(account.balance) || 0 : 0;
   }, [bankConnections, selectedAccount, loadingConnections]);
 
+  // ----------------------------------------------------------------------
+  // NOVA LÓGICA REVERSA PARA O RESUMO DO PERÍODO
+  // ----------------------------------------------------------------------
   const { initialBalance, finalBalance, periodLabel } = useMemo(() => {
+    // 1. Filtra as transações da conta selecionada (independente de data)
     const filteredByAccount =
       selectedAccount === "all"
         ? transactions
         : transactions.filter((t) => t.account_id === selectedAccount || t.bank_account === selectedAccount);
 
-    const initial = filteredByAccount
-      .filter((t) => new Date(t.date) < periodStart)
-      .reduce((sum, t) => sum + (t.type === "income" ? t.amount : -Math.abs(t.amount)), 0);
+    // 2. Define o Saldo Atual Real (agora)
+    let currentBalanceReal = 0;
+    if (selectedAccount === "all") {
+      currentBalanceReal = bankConnections.reduce((acc, account) => acc + (Number(account.balance) || 0), 0);
+    } else {
+      const acc = bankConnections.find(
+        (a) => a.id === selectedAccount || a.pluggy_account_id === selectedAccount || a.account_id === selectedAccount,
+      );
+      currentBalanceReal = acc ? Number(acc.balance) || 0 : 0;
+    }
 
-    const final = filteredByAccount
-      .filter((t) => new Date(t.date) <= periodEnd)
-      .reduce((sum, t) => sum + (t.type === "income" ? t.amount : -Math.abs(t.amount)), 0);
+    // 3. Calcula Saldo Final do Período (Voltando do Presente até o Fim do Período)
+    // Se o período termina hoje ou no futuro, o saldo final é o saldo atual.
+    // Se o período terminou mês passado, temos que desfazer o que aconteceu DEPOIS do período.
 
+    const transactionsAfterPeriod = filteredByAccount.filter((t) => isAfter(new Date(t.date), periodEnd));
+
+    // Soma das transações que aconteceram DEPOIS (para subtrair do saldo atual)
+    const changeAfterPeriod = transactionsAfterPeriod.reduce((sum, t) => {
+      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
+    }, 0);
+
+    const final = currentBalanceReal - changeAfterPeriod;
+
+    // 4. Calcula Saldo Inicial do Período (Voltando do Fim do Período até o Início)
+    // Initial = Final - (Receitas - Despesas do Período)
+
+    const transactionsInPeriod = filteredByAccount.filter((t) => {
+      const d = new Date(t.date);
+      return d >= periodStart && d <= periodEnd;
+    });
+
+    const changeInPeriod = transactionsInPeriod.reduce((sum, t) => {
+      return sum + (t.type === "income" ? t.amount : -Math.abs(t.amount));
+    }, 0);
+
+    const initial = final - changeInPeriod;
+
+    // Formatação do Label
     let label;
     if (customPeriod) {
       const startFormatted = format(periodStart, "MMM/yy", { locale: ptBR });
@@ -183,7 +224,7 @@ export default function Dashboard() {
     }
 
     return { initialBalance: initial, finalBalance: final, periodLabel: label };
-  }, [transactions, selectedAccount, periodStart, periodEnd, customPeriod, selectedMonth]);
+  }, [transactions, selectedAccount, periodStart, periodEnd, customPeriod, selectedMonth, bankConnections]);
 
   const monthStats = useMemo(() => {
     const income = filteredTransactions.filter((t) => t.type === "income").reduce((sum, t) => sum + t.amount, 0);
@@ -192,6 +233,7 @@ export default function Dashboard() {
       .filter((t) => t.type === "expense")
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
+    // O "balance" aqui é apenas o Resultado do Mês (Receita - Despesa)
     return { income, expense, balance: income - expense };
   }, [filteredTransactions]);
 
@@ -235,7 +277,6 @@ export default function Dashboard() {
 
   return (
     <div className="p-3 md:p-4 space-y-3">
-      {/* CORREÇÃO: Passando bankConnections para a prop 'accounts' */}
       <AccountBalance
         balance={totalBalance}
         selectedAccount={selectedAccount}
@@ -321,7 +362,6 @@ export default function Dashboard() {
             </Alert>
           )}
 
-          {/* CORREÇÃO: Passando bankConnections para a prop 'accounts' */}
           {transactions.length > 0 && <CashBalanceEvolution transactions={transactions} accounts={bankConnections} />}
 
           <RecentTransactions transactions={transactions} />
