@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Loader2, Link as LinkIcon, RefreshCw, AlertTriangle, CheckCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { supabase } from "@/integrations/supabase/client";
+
+const N8N_TOKEN_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/get-pluggy-token';
 
 export default function ConnectBankButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
@@ -76,22 +77,26 @@ SOLUÇÕES:
         throw new Error('Pluggy não está carregado. Recarregue a página (F5).');
       }
 
-      console.log('🔑 Solicitando token...');
-      const { data, error: fnError } = await supabase.functions.invoke('createPluggyConnectToken', {});
+      console.log('🔑 Solicitando token via n8n...');
+      const response = await fetch(N8N_TOKEN_WEBHOOK, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-      if (fnError) throw fnError;
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro ao criar token');
+      if (!response.ok) {
+        throw new Error('Erro ao obter token do n8n');
       }
 
-      if (!data.connectToken) {
-        throw new Error('Token não foi retornado');
+      const data = await response.json();
+      
+      if (!data.accessToken) {
+        throw new Error('Token não foi retornado pelo n8n');
       }
 
-      console.log('✅ Token obtido');
+      console.log('✅ Token obtido via n8n');
 
       const pluggyConnect = new window.PluggyConnect({
-        connectToken: data.connectToken,
+        connectToken: data.accessToken,
         includeSandbox: false,
         onSuccess: async (itemData) => {
           console.log('✅ Banco conectado!', itemData);

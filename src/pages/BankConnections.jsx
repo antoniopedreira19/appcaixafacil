@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 import { 
   Building2, 
   Zap,
@@ -16,16 +17,18 @@ import {
 import ConnectBankButton from "../components/bank/ConnectBankButton";
 import BankConnectionCard from "../components/bank/BankConnectionCard";
 
+const N8N_SYNC_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/sync-pluggy-data';
+
 export default function BankConnections() {
   const queryClient = useQueryClient();
 
   const { data: connections, isLoading } = useQuery({
-    queryKey: ['bank-connections'],
+    queryKey: ['accounts'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('bank_connections')
+        .from('accounts')
         .select('*')
-        .order('created_date', { ascending: false });
+        .order('created_at', { ascending: false });
       
       if (error) throw error;
       return data || [];
@@ -35,87 +38,105 @@ export default function BankConnections() {
 
   const createConnectionMutation = useMutation({
     mutationFn: async (itemData) => {
-      const { data, error } = await supabase
-        .from('bank_connections')
-        .insert({
-          pluggy_item_id: itemData.item.id,
-          bank_name: itemData.item.connector.name,
-          bank_logo: itemData.item.connector.imageUrl,
-          connector_id: itemData.item.connector.id,
-          status: 'active',
-          last_sync: new Date().toISOString(),
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      // Chama o webhook n8n para sincronizar dados (ele salva accounts e transactions)
+      console.log('🔄 Sincronizando dados via n8n...');
+      const response = await fetch(N8N_SYNC_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: itemData.item.id,
+          userId: user.id
         })
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar com n8n');
+      }
+
+      const result = await response.json();
+      console.log('✅ Sincronização n8n concluída:', result);
+      return result;
     },
-    onSuccess: async (connection) => {
-      queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
-      
-      // Sincroniza automaticamente após conectar
-      setTimeout(() => {
-        syncConnection(connection.id);
-      }, 1000);
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      toast.success('Banco conectado e sincronizado com sucesso!');
     },
+    onError: (error) => {
+      toast.error(`Erro: ${error.message}`);
+    }
   });
 
   const syncMutation = useMutation({
-    mutationFn: async (connectionId) => {
-      const { data, error } = await supabase.functions.invoke('syncPluggyTransactions', {
-        body: { connectionId }
+    mutationFn: async (accountId) => {
+      const account = connections.find(c => c.id === accountId);
+      if (!account) throw new Error('Conta não encontrada');
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      console.log('🔄 Sincronizando via n8n...');
+      const response = await fetch(N8N_SYNC_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: account.pluggy_item_id,
+          userId: user.id
+        })
       });
 
-      if (error) throw error;
-      if (!data.success) {
-        throw new Error(data.error || 'Erro ao sincronizar');
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar com n8n');
       }
 
-      return data;
+      const result = await response.json();
+      console.log('✅ Sincronização concluída:', result);
+      return result;
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      
-      if (data.imported > 0) {
-        alert(`✅ ${data.imported} transações importadas com sucesso!`);
-      } else {
-        alert('✅ Sincronização concluída. Nenhuma transação nova encontrada.');
-      }
+      toast.success('Sincronização concluída!');
     },
     onError: (error) => {
-      alert(`❌ Erro: ${error.message}`);
+      toast.error(`Erro: ${error.message}`);
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (connectionId) => {
-      const connection = connections.find(c => c.id === connectionId);
+    mutationFn: async (accountId) => {
+      const account = connections.find(c => c.id === accountId);
       
-      if (!connection) {
-        throw new Error('Conexão não encontrada');
+      if (!account) {
+        throw new Error('Conta não encontrada');
       }
       
-      // Deleta no Pluggy
-      const { data, error: fnError } = await supabase.functions.invoke('deletePluggyItem', {
-        body: { itemId: connection.pluggy_item_id }
-      });
-
-      if (fnError || !data?.success) {
-        console.warn('Erro ao deletar no Pluggy:', fnError || data?.error);
+      // Deleta no Pluggy (opcional - pode falhar)
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('deletePluggyItem', {
+          body: { itemId: account.pluggy_item_id }
+        });
+        if (fnError || !data?.success) {
+          console.warn('Erro ao deletar no Pluggy:', fnError || data?.error);
+        }
+      } catch (e) {
+        console.warn('Erro ao deletar no Pluggy:', e);
       }
 
-      // Deleta localmente
+      // Deleta localmente na tabela accounts
       const { error } = await supabase
-        .from('bank_connections')
+        .from('accounts')
         .delete()
-        .eq('id', connectionId);
+        .eq('id', accountId);
       
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      toast.success('Conta removida!');
     },
   });
 
