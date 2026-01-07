@@ -5,14 +5,29 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const N8N_TOKEN_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/get-pluggy-token';
 
+const isInIframe = () => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+};
+
+const openInNewTab = () => {
+  window.open(window.location.href, '_blank', 'noopener,noreferrer');
+};
 export default function PluggyConnectButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [scriptReady, setScriptReady] = useState(false);
   const [loadingScript, setLoadingScript] = useState(true);
 
-  // Carrega o script ao montar o componente
+  // Carrega o script ao montar o componente (fora do preview/iframe)
   useEffect(() => {
+    if (isInIframe()) {
+      setLoadingScript(false);
+      return;
+    }
     loadPluggyScript();
   }, []);
 
@@ -21,6 +36,10 @@ export default function PluggyConnectButton({ onSuccess }) {
     setError(null);
 
     try {
+      if (isInIframe()) {
+        throw new Error('O Pluggy não carrega no preview (iframe). Abra em nova aba ou publique o app.');
+      }
+
       // Se já existe, está pronto
       if (window.PluggyConnect) {
         console.log('✅ PluggyConnect já disponível');
@@ -88,7 +107,7 @@ export default function PluggyConnectButton({ onSuccess }) {
       }
 
       if (!loaded) {
-        throw new Error('Não foi possível carregar o Pluggy. Desative bloqueadores de anúncios ou use aba anônima.');
+        throw new Error('Não foi possível carregar o Pluggy. Se estiver no preview, abra em nova aba; caso contrário, desative bloqueadores de anúncios ou use aba anônima.');
       }
 
       setScriptReady(true);
@@ -101,11 +120,6 @@ export default function PluggyConnectButton({ onSuccess }) {
   };
 
   const handleConnect = async () => {
-    if (!scriptReady) {
-      await loadPluggyScript();
-      if (!window.PluggyConnect) return;
-    }
-
     setLoading(true);
     setError(null);
 
@@ -113,7 +127,7 @@ export default function PluggyConnectButton({ onSuccess }) {
       console.log('🔑 Buscando token via n8n...');
       const response = await fetch(N8N_TOKEN_WEBHOOK, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -122,19 +136,31 @@ export default function PluggyConnectButton({ onSuccess }) {
 
       const data = await response.json();
       const connectToken = data.accessToken;
-      
+
       if (!connectToken) {
         throw new Error('Token não retornado pelo n8n');
       }
       console.log('✅ Token obtido via n8n');
 
+      if (!scriptReady) {
+        await loadPluggyScript();
+      }
+
+      if (!window.PluggyConnect) {
+        throw new Error(
+          isInIframe()
+            ? 'O Pluggy não abre no preview (iframe). Abra em nova aba ou publique o app.'
+            : 'Pluggy não carregou. Tente novamente.'
+        );
+      }
+
       const pluggy = new window.PluggyConnect({
-        connectToken: connectToken,
+        connectToken,
         includeSandbox: false,
         onSuccess: (itemData) => {
           console.log('✅ Conexão realizada!', itemData);
           setLoading(false);
-          if (onSuccess) onSuccess(itemData);
+          onSuccess?.(itemData);
         },
         onError: (err) => {
           console.error('❌ Erro no widget:', err);
@@ -144,14 +170,13 @@ export default function PluggyConnectButton({ onSuccess }) {
         onClose: () => {
           console.log('🚪 Widget fechado');
           setLoading(false);
-        }
+        },
       });
 
       pluggy.init();
-
     } catch (err) {
       console.error('❌ Erro:', err);
-      setError(err.message);
+      setError(err?.message || 'Erro desconhecido');
       setLoading(false);
     }
   };
@@ -187,6 +212,18 @@ export default function PluggyConnectButton({ onSuccess }) {
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
+
+          {isInIframe() && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openInNewTab}
+              className="w-full"
+            >
+              Abrir em nova aba
+            </Button>
+          )}
+
           <Button 
             variant="outline" 
             size="sm" 
