@@ -1,7 +1,6 @@
-
 import React, { useState, useCallback, useMemo } from "react";
-import { base44 } from "@/api/base44Client";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -150,6 +149,28 @@ const detectType = (typeStr, value, description) => {
   return value < 0 ? 'expense' : 'income';
 };
 
+// Função simples para categorizar baseado em palavras-chave
+const categorizeTransaction = (description, type) => {
+  const desc = description.toLowerCase();
+  
+  if (type === 'income') {
+    if (desc.includes('vend') || desc.includes('receita')) return 'vendas';
+    if (desc.includes('serviço') || desc.includes('honorário')) return 'servicos';
+    return 'outras_receitas';
+  }
+  
+  // Despesas
+  if (desc.includes('salário') || desc.includes('folha') || desc.includes('funcionário')) return 'salarios_funcionarios';
+  if (desc.includes('fornecedor')) return 'fornecedores';
+  if (desc.includes('aluguel')) return 'aluguel';
+  if (desc.includes('luz') || desc.includes('água') || desc.includes('internet') || desc.includes('telefone')) return 'contas_servicos';
+  if (desc.includes('imposto') || desc.includes('taxa') || desc.includes('darf')) return 'impostos_taxas';
+  if (desc.includes('marketing') || desc.includes('publicidade')) return 'marketing_publicidade';
+  if (desc.includes('combustível') || desc.includes('uber') || desc.includes('99') || desc.includes('transporte')) return 'combustivel_transporte';
+  
+  return 'outras_despesas';
+};
+
 export default function UploadStatement() {
   const queryClient = useQueryClient();
   const [file, setFile] = useState(null);
@@ -165,7 +186,15 @@ export default function UploadStatement() {
 
   const { data: transactions, isLoading: loadingTransactions } = useQuery({
     queryKey: ['transactions'],
-    queryFn: () => base44.entities.Transaction.list('-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
@@ -175,7 +204,7 @@ export default function UploadStatement() {
       t.notes && (
         t.notes.includes('Importado do extrato CSV em') ||
         t.notes.includes('Importado em') ||
-        t.notes.includes('Importado via Pluggy') // Adicionado para cobrir outras fontes de importação
+        t.notes.includes('Importado via Pluggy')
       )
     );
     
@@ -183,12 +212,12 @@ export default function UploadStatement() {
     
     const groups = {};
     importedTransactions.forEach(t => {
-      const noteKey = t.notes; // Use the full note as key to group by exact import
+      const noteKey = t.notes;
       if (!groups[noteKey]) {
         groups[noteKey] = {
           note: noteKey,
           transactions: [],
-          created_date: t.created_date,
+          created_at: t.created_at,
           bank_account: t.bank_account || 'Sem conta'
         };
       }
@@ -196,15 +225,21 @@ export default function UploadStatement() {
     });
     
     return Object.values(groups).sort((a, b) => {
-      // Sort by the created_date of the first transaction in the group
-      return new Date(b.created_date) - new Date(a.created_date);
+      return new Date(b.created_at) - new Date(a.created_at);
     });
   }, [transactions]);
 
   const deleteImportMutation = useMutation({
     mutationFn: async (transactionIds) => {
-      // Delete in parallel to be faster
-      await Promise.all(transactionIds.map(id => base44.entities.Transaction.delete(id)));
+      // Delete in batches
+      for (const id of transactionIds) {
+        const { error } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -326,7 +361,7 @@ export default function UploadStatement() {
       setMessage(`Processando ${rows.length} transações...`);
       
       // Converte as linhas em transações
-      const transactions = rows
+      const parsedTransactions = rows
         .map(row => {
           const dateStr = row[columnMapping.date];
           const description = row[columnMapping.description] || '';
@@ -356,98 +391,44 @@ export default function UploadStatement() {
           return true;
         });
       
-      if (transactions.length === 0) {
+      if (parsedTransactions.length === 0) {
         throw new Error("Nenhuma transação válida encontrada após processar o arquivo.");
       }
       
       setProgress(60);
-      setMessage(`Categorizando ${transactions.length} transações com IA...`);
+      setMessage(`Categorizando ${parsedTransactions.length} transações...`);
       
-      // Categoriza em lotes de 30
-      const batchSize = 30;
-      let categories = [];
+      // Categoriza localmente (sem IA por enquanto)
+      const categorizedTransactions = parsedTransactions.map(t => ({
+        ...t,
+        category: categorizeTransaction(t.description, t.type)
+      }));
       
-      for (let i = 0; i < transactions.length; i += batchSize) {
-        const batch = transactions.slice(i, i + batchSize);
-        
-        const categorizationPrompt = `Categorize cada transação abaixo em UMA categoria.
-
-**Para RECEITAS (income):**
-- vendas: Vendas de produtos/serviços
-- servicos: Prestação de serviços, honorários
-- outras_receitas: Outras receitas
-
-**Para DESPESAS (expense):**
-- salarios_funcionarios: Salários e folha de pagamento
-- fornecedores: Pagamentos a fornecedores
-- aluguel: Aluguel
-- contas_servicos: Luz, água, internet, telefone
-- impostos_taxas: Impostos e taxas
-- marketing_publicidade: Marketing
-- equipamentos_materiais: Equipamentos e materiais
-- manutencao: Manutenção
-- combustivel_transporte: Combustível e transporte
-- outras_despesas: Outras despesas
-
-**Transações:**
-${batch.map((t, idx) => `${idx + 1}. "${t.description}" | ${t.type} | R$ ${t.amount.toFixed(2)}`).join('\n')}
-
-Retorne APENAS um array JSON com as categorias na mesma ordem:
-["categoria1", "categoria2", ...]`;
-
-        try {
-          const catResult = await base44.integrations.Core.InvokeLLM({
-            prompt: categorizationPrompt,
-            response_json_schema: {
-              type: "object",
-              properties: {
-                categories: {
-                  type: "array",
-                  items: { type: "string" }
-                }
-              }
-            }
-          });
-          
-          categories = categories.concat(catResult.categories || []);
-        } catch (error) {
-          console.warn('Erro na categorização do lote, usando categorias padrão:', error);
-          // Usa categorias padrão se falhar
-          categories = categories.concat(batch.map(t => 
-            t.type === 'income' ? 'outras_receitas' : 'outras_despesas'
-          ));
-        }
-        
-        // Atualiza progresso
-        const batchProgress = 60 + (30 * (i + batch.length) / transactions.length);
-        setProgress(Math.round(batchProgress));
-      }
-      
-      setProgress(90);
+      setProgress(80);
       setMessage("Salvando transações...");
       
-      // Cria as transações
-      const transactionsToCreate = transactions.map((t, i) => {
-        const category = categories[i] || (t.type === 'income' ? 'outras_receitas' : 'outras_despesas');
-        
-        return {
-          date: t.date,
-          description: t.description,
-          amount: t.type === 'expense' ? -Math.abs(t.amount) : Math.abs(t.amount),
-          type: t.type,
-          category: category,
-          payment_method: "transferencia",
-          bank_account: bankAccountName.trim(),
-          notes: `Importado do extrato CSV em ${new Date().toLocaleDateString('pt-BR')}`
-        };
-      });
+      // Cria as transações no Supabase
+      const transactionsToCreate = categorizedTransactions.map(t => ({
+        date: t.date,
+        description: t.description,
+        amount: t.type === 'expense' ? -Math.abs(t.amount) : Math.abs(t.amount),
+        type: t.type,
+        category: t.category,
+        payment_method: "transferencia",
+        bank_account: bankAccountName.trim(),
+        notes: `Importado do extrato CSV em ${new Date().toLocaleDateString('pt-BR')}`
+      }));
 
-      await base44.entities.Transaction.bulkCreate(transactionsToCreate);
+      const { error } = await supabase
+        .from('transactions')
+        .insert(transactionsToCreate);
+
+      if (error) throw error;
 
       setProgress(100);
       setStatus("success");
-      setExtractedCount(transactions.length);
-      setMessage(`✅ ${transactions.length} transações importadas com sucesso!`);
+      setExtractedCount(parsedTransactions.length);
+      setMessage(`✅ ${parsedTransactions.length} transações importadas com sucesso!`);
       
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       

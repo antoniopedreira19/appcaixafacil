@@ -1,6 +1,6 @@
 import React from "react";
-import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,20 +21,35 @@ export default function BankConnections() {
 
   const { data: connections, isLoading } = useQuery({
     queryKey: ['bank-connections'],
-    queryFn: () => base44.entities.BankConnection.list('-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bank_connections')
+        .select('*')
+        .order('created_date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
   const createConnectionMutation = useMutation({
     mutationFn: async (itemData) => {
-      return await base44.entities.BankConnection.create({
-        pluggy_item_id: itemData.item.id,
-        bank_name: itemData.item.connector.name,
-        bank_logo: itemData.item.connector.imageUrl,
-        connector_id: itemData.item.connector.id,
-        status: 'active',
-        last_sync: new Date().toISOString(),
-      });
+      const { data, error } = await supabase
+        .from('bank_connections')
+        .insert({
+          pluggy_item_id: itemData.item.id,
+          bank_name: itemData.item.connector.name,
+          bank_logo: itemData.item.connector.imageUrl,
+          connector_id: itemData.item.connector.id,
+          status: 'active',
+          last_sync: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
     },
     onSuccess: async (connection) => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
@@ -48,13 +63,16 @@ export default function BankConnections() {
 
   const syncMutation = useMutation({
     mutationFn: async (connectionId) => {
-      const response = await base44.functions.invoke('syncPluggyTransactions', { connectionId });
+      const { data, error } = await supabase.functions.invoke('syncPluggyTransactions', {
+        body: { connectionId }
+      });
 
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Erro ao sincronizar');
+      if (error) throw error;
+      if (!data.success) {
+        throw new Error(data.error || 'Erro ao sincronizar');
       }
 
-      return response.data;
+      return data;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
@@ -80,16 +98,21 @@ export default function BankConnections() {
       }
       
       // Deleta no Pluggy
-      const response = await base44.functions.invoke('deletePluggyItem', { 
-        itemId: connection.pluggy_item_id 
+      const { data, error: fnError } = await supabase.functions.invoke('deletePluggyItem', {
+        body: { itemId: connection.pluggy_item_id }
       });
 
-      if (!response.data.success) {
-        console.warn('Erro ao deletar no Pluggy:', response.data.error);
+      if (fnError || !data?.success) {
+        console.warn('Erro ao deletar no Pluggy:', fnError || data?.error);
       }
 
       // Deleta localmente
-      await base44.entities.BankConnection.delete(connectionId);
+      const { error } = await supabase
+        .from('bank_connections')
+        .delete()
+        .eq('id', connectionId);
+      
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });

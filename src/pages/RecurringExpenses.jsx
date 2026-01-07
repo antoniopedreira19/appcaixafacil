@@ -1,7 +1,6 @@
-
 import React, { useState, useMemo } from "react";
-import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,13 +41,29 @@ export default function RecurringExpenses() {
 
   const { data: recurringExpenses, isLoading } = useQuery({
     queryKey: ['recurring-expenses'],
-    queryFn: () => base44.entities.RecurringExpense.list('due_day'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('recurring_expenses')
+        .select('*')
+        .order('due_day', { ascending: true });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
   const { data: transactions } = useQuery({
     queryKey: ['transactions'],
-    queryFn: () => base44.entities.Transaction.list('-date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
@@ -109,26 +124,20 @@ export default function RecurringExpenses() {
       let selectedText = '';
 
       if (words.length > 0) {
-        // Prioriza a primeira palavra significativa
         selectedText = words[0];
-        // Se a primeira palavra é muito curta (até 4 letras) e há mais de uma palavra significativa,
-        // tenta pegar as duas primeiras palavras significativas.
         if (selectedText.length <= 4 && words.length > 1) {
           selectedText = words.slice(0, 2).join(' ');
         }
       } else {
-        // Se não há palavras significativas (>2 letras), pega a primeira palavra não filtrada
         const allWords = cleaned.split(' ');
         if (allWords.length > 0) {
           selectedText = allWords[0];
-          // Se a primeira palavra não filtrada é muito curta e há mais de uma palavra, tenta pegar as duas
           if (selectedText.length <= 4 && allWords.length > 1) {
             selectedText = allWords.slice(0, 2).join(' ');
           }
         }
       }
 
-      // Capitaliza a primeira letra de cada palavra em selectedText
       if (!selectedText) return '';
       return selectedText.split(' ').map(word => {
         if (!word) return '';
@@ -141,7 +150,7 @@ export default function RecurringExpenses() {
       .filter(t => t.type === 'expense')
       .forEach(t => {
         const cleanedDesc = cleanDescription(t.description);
-        if (!cleanedDesc) return; // Skip if description is empty after cleaning
+        if (!cleanedDesc) return;
 
         const date = new Date(t.date);
         const day = date.getDate();
@@ -162,7 +171,6 @@ export default function RecurringExpenses() {
       .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5)
       .map(([desc, data]) => {
-        // Calcula o dia mais frequente
         const dayFrequency = {};
         data.days.forEach(day => {
           dayFrequency[day] = (dayFrequency[day] || 0) + 1;
@@ -177,19 +185,27 @@ export default function RecurringExpenses() {
         };
       });
 
-    // Remove sugestões que já existem
     const existingNames = recurringExpenses.map(e => e.name.toLowerCase());
     return recurring.filter(item => !existingNames.includes(item.name.toLowerCase()));
   }, [transactions, recurringExpenses]);
 
   const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.RecurringExpense.create({
-      ...data,
-      category: 'outras_despesas',
-      amount: 0,
-      status: 'active',
-      notify_email: true
-    }),
+    mutationFn: async (data) => {
+      const { data: result, error } = await supabase
+        .from('recurring_expenses')
+        .insert({
+          ...data,
+          category: 'outras_despesas',
+          amount: 0,
+          status: 'active',
+          notify_email: true
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return result;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-expenses'] });
       setNewExpense({ name: "", due_day: "5", reminder_days_before: "3" });
@@ -197,7 +213,14 @@ export default function RecurringExpenses() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.RecurringExpense.update(id, data),
+    mutationFn: async ({ id, data }) => {
+      const { error } = await supabase
+        .from('recurring_expenses')
+        .update(data)
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-expenses'] });
       setEditingName({});
@@ -205,7 +228,14 @@ export default function RecurringExpenses() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.RecurringExpense.delete(id),
+    mutationFn: async (id) => {
+      const { error } = await supabase
+        .from('recurring_expenses')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['recurring-expenses'] });
     },
@@ -239,10 +269,8 @@ export default function RecurringExpenses() {
 
     const newName = editingName[id];
     if (newName !== undefined && newName.trim() !== expense.name) {
-      const updateData = { ...expense, name: newName.trim() };
-      updateMutation.mutate({ id, data: updateData });
+      updateMutation.mutate({ id, data: { name: newName.trim() } });
     } else {
-      // Remove do estado de edição se não mudou
       const newEditingState = { ...editingName };
       delete newEditingState[id];
       setEditingName(newEditingState);
@@ -253,7 +281,7 @@ export default function RecurringExpenses() {
     const expense = recurringExpenses.find(e => e.id === id);
     if (!expense) return;
 
-    const updateData = { ...expense };
+    const updateData = {};
 
     if (field === 'due_day') {
       updateData.due_day = parseInt(value);
@@ -470,46 +498,29 @@ export default function RecurringExpenses() {
               </div>
 
               {/* Botão adicionar */}
-              <div className="md:col-span-1 flex justify-center">
+              <div className="md:col-span-1 flex justify-end md:justify-center">
                 <Button
+                  size="icon"
                   onClick={handleAddExpense}
-                  disabled={!newExpense.name.trim() || createMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 w-full md:w-auto"
+                  disabled={!newExpense.name.trim()}
+                  className="bg-blue-600 hover:bg-blue-700"
                 >
-                  <Plus className="w-4 h-4 md:mr-0 mr-2" />
-                  <span className="md:hidden">Adicionar</span>
+                  <Plus className="w-4 h-4" />
                 </Button>
               </div>
             </div>
-
-            {recurringExpenses.length === 0 && (
-              <div className="text-center py-8 text-slate-500">
-                <p className="text-sm">Nenhuma despesa recorrente cadastrada ainda</p>
-                <p className="text-xs mt-1">Adicione uma despesa acima para começar</p>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Informações */}
-      <Card className="border-blue-200 bg-blue-50">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-3">
-            <CheckCircle2 className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-2 text-sm text-blue-900">
-              <p className="font-semibold">💡 Como funciona:</p>
-              <ul className="space-y-1 list-disc list-inside">
-                <li>Adicione suas despesas fixas mensais (aluguel, luz, internet, etc.)</li>
-                <li>Configure o dia de vencimento e quando quer ser lembrado</li>
-                <li>Receba notificações automáticas por email nos dias configurados</li>
-                <li>Edite qualquer informação clicando diretamente nos campos</li>
-                <li>As sugestões já vêm com o dia mais comum de pagamento detectado automaticamente!</li>
-              </ul>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Dica final */}
+      <Alert className="border-green-200 bg-green-50">
+        <CheckCircle2 className="h-4 w-4 text-green-600" />
+        <AlertDescription className="text-green-900">
+          <strong>Dica:</strong> Configure suas despesas fixas aqui para receber lembretes 
+          automáticos antes do vencimento e nunca mais esquecer de pagar uma conta!
+        </AlertDescription>
+      </Alert>
     </div>
   );
 }
