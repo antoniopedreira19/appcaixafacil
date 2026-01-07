@@ -1,5 +1,5 @@
 import React from "react";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,21 +21,32 @@ export default function BankConnectionsNew() {
 
   const { data: connections, isLoading } = useQuery({
     queryKey: ['bank-connections'],
-    queryFn: () => base44.entities.BankConnection.list('-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
   // Criar conexão após sucesso do widget
   const createMutation = useMutation({
     mutationFn: async (itemData) => {
-      return await base44.entities.BankConnection.create({
-        pluggy_item_id: itemData.item.id,
-        bank_name: itemData.item.connector?.name || 'Banco',
-        bank_logo: itemData.item.connector?.imageUrl || '',
-        connector_id: itemData.item.connector?.id || 0,
-        status: 'active',
-        last_sync: new Date().toISOString(),
-      });
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data, error } = await supabase
+        .from('accounts')
+        .insert({
+          pluggy_item_id: itemData.item.id,
+          name: itemData.item.connector?.name || 'Banco',
+          user_id: user?.id,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
@@ -44,12 +55,15 @@ export default function BankConnectionsNew() {
 
   // Sincronizar transações
   const syncMutation = useMutation({
-    mutationFn: async (connectionId) => {
-      const response = await base44.functions.invoke('syncPluggyTransactions', { connectionId });
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Erro ao sincronizar');
+    mutationFn: async (connection) => {
+      const { data, error } = await supabase.functions.invoke('syncPluggyTransactions', {
+        body: { itemId: connection.pluggy_item_id, accountId: connection.pluggy_account_id }
+      });
+      if (error) throw error;
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro ao sincronizar');
       }
-      return response.data;
+      return data;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
@@ -63,18 +77,21 @@ export default function BankConnectionsNew() {
 
   // Deletar conexão
   const deleteMutation = useMutation({
-    mutationFn: async (connectionId) => {
-      const connection = connections.find(c => c.id === connectionId);
+    mutationFn: async (connection) => {
       if (connection?.pluggy_item_id) {
         try {
-          await base44.functions.invoke('deletePluggyItem', { 
-            itemId: connection.pluggy_item_id 
+          await supabase.functions.invoke('deletePluggyItem', { 
+            body: { itemId: connection.pluggy_item_id }
           });
         } catch (e) {
           console.warn('Erro ao deletar no Pluggy:', e);
         }
       }
-      await base44.entities.BankConnection.delete(connectionId);
+      const { error } = await supabase
+        .from('accounts')
+        .delete()
+        .eq('id', connection.id);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
@@ -128,15 +145,11 @@ export default function BankConnectionsNew() {
               <Card key={conn.id} className="border-slate-200">
                 <CardContent className="p-4">
                   <div className="flex items-center gap-3 mb-3">
-                    {conn.bank_logo ? (
-                      <img src={conn.bank_logo} alt={conn.bank_name} className="w-10 h-10 rounded" />
-                    ) : (
-                      <div className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-slate-500" />
-                      </div>
-                    )}
+                    <div className="w-10 h-10 bg-slate-100 rounded flex items-center justify-center">
+                      <Building2 className="w-5 h-5 text-slate-500" />
+                    </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold text-slate-900">{conn.bank_name}</h3>
+                      <h3 className="font-semibold text-slate-900">{conn.name || 'Banco'}</h3>
                       <div className="flex items-center gap-1 text-sm">
                         <CheckCircle className="w-3 h-3 text-green-500" />
                         <span className="text-green-600">Conectado</span>
@@ -148,7 +161,7 @@ export default function BankConnectionsNew() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => syncMutation.mutate(conn.id)}
+                      onClick={() => syncMutation.mutate(conn)}
                       disabled={syncMutation.isPending}
                       className="flex-1"
                     >
@@ -166,7 +179,7 @@ export default function BankConnectionsNew() {
                       size="sm"
                       onClick={() => {
                         if (confirm('Remover esta conexão?')) {
-                          deleteMutation.mutate(conn.id);
+                          deleteMutation.mutate(conn);
                         }
                       }}
                       disabled={deleteMutation.isPending}

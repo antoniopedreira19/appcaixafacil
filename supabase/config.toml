@@ -1,1 +1,13 @@
 project_id = "yisbltqhpnsnzfiioqmg"
+
+[functions.createPluggyConnectToken]
+verify_jwt = false
+
+[functions.syncPluggyTransactions]
+verify_jwt = false
+
+[functions.deletePluggyItem]
+verify_jwt = false
+
+[functions.chatGPT]
+verify_jwt = false

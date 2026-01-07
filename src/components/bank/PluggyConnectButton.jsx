@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Loader2, Building2, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function PluggyConnectButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
@@ -110,22 +110,23 @@ export default function PluggyConnectButton({ onSuccess }) {
 
     try {
       console.log('🔑 Buscando token...');
-      const response = await base44.functions.invoke('createPluggyConnectToken', {});
+      const { data, error: fnError } = await supabase.functions.invoke('createPluggyConnectToken', {});
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Erro ao criar token');
+      if (fnError) throw fnError;
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro ao criar token');
       }
 
-      const connectToken = response.data.connectToken;
+      const connectToken = data.connectToken;
       console.log('✅ Token obtido');
 
       const pluggy = new window.PluggyConnect({
         connectToken: connectToken,
         includeSandbox: false,
-        onSuccess: (data) => {
-          console.log('✅ Conexão realizada!', data);
+        onSuccess: (itemData) => {
+          console.log('✅ Conexão realizada!', itemData);
           setLoading(false);
-          if (onSuccess) onSuccess(data);
+          if (onSuccess) onSuccess(itemData);
         },
         onError: (err) => {
           console.error('❌ Erro no widget:', err);
