@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Loader2, Building2, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { supabase } from "@/integrations/supabase/client";
+
+const N8N_TOKEN_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/get-pluggy-token';
 
 export default function PluggyConnectButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
@@ -109,16 +110,23 @@ export default function PluggyConnectButton({ onSuccess }) {
     setError(null);
 
     try {
-      console.log('🔑 Buscando token...');
-      const { data, error: fnError } = await supabase.functions.invoke('createPluggyConnectToken', {});
+      console.log('🔑 Buscando token via n8n...');
+      const response = await fetch(N8N_TOKEN_WEBHOOK, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-      if (fnError) throw fnError;
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro ao criar token');
+      if (!response.ok) {
+        throw new Error('Erro ao obter token do n8n');
       }
 
-      const connectToken = data.connectToken;
-      console.log('✅ Token obtido');
+      const data = await response.json();
+      const connectToken = data.accessToken;
+      
+      if (!connectToken) {
+        throw new Error('Token não retornado pelo n8n');
+      }
+      console.log('✅ Token obtido via n8n');
 
       const pluggy = new window.PluggyConnect({
         connectToken: connectToken,
