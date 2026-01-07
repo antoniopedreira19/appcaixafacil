@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
-import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,15 @@ export default function ManageBankAccounts() {
 
   const { data: transactions, isLoading } = useQuery({
     queryKey: ['transactions'],
-    queryFn: () => base44.entities.Transaction.list('-date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
@@ -64,10 +72,12 @@ export default function ManageBankAccounts() {
 
       // Atualiza todas as transações dessa conta
       for (const transaction of account.transactions) {
-        await base44.entities.Transaction.update(transaction.id, {
-          ...transaction,
-          bank_account: newNameValue.trim()
-        });
+        const { error } = await supabase
+          .from('transactions')
+          .update({ bank_account: newNameValue.trim() })
+          .eq('id', transaction.id);
+        
+        if (error) throw error;
       }
 
       // Invalida cache e limpa estados

@@ -1,16 +1,15 @@
 import React from "react";
-import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { BookOpen, Clock, TrendingUp } from "lucide-react";
+import { BookOpen, Clock } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 
 const CATEGORY_COLORS = {
@@ -36,7 +35,15 @@ export default function Content() {
 
   const { data: articles, isLoading } = useQuery({
     queryKey: ['articles'],
-    queryFn: () => base44.entities.ContentArticle.list('-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('content_articles')
+        .select('*')
+        .order('created_date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
