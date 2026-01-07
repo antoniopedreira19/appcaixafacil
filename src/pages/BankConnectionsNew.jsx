@@ -16,6 +16,8 @@ import {
 
 import PluggyConnectButton from "../components/bank/PluggyConnectButton";
 
+const N8N_SYNC_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/sync-pluggy-data';
+
 export default function BankConnectionsNew() {
   const queryClient = useQueryClient();
 
@@ -32,43 +34,62 @@ export default function BankConnectionsNew() {
     initialData: [],
   });
 
-  // Criar conexão após sucesso do widget
-  const createMutation = useMutation({
+  // Conectar e sincronizar após sucesso do widget (via n8n)
+  const connectMutation = useMutation({
     mutationFn: async (itemData) => {
       const { data: { user } } = await supabase.auth.getUser();
-      const { data, error } = await supabase
-        .from('accounts')
-        .insert({
-          pluggy_item_id: itemData.item.id,
-          name: itemData.item.connector?.name || 'Banco',
-          user_id: user?.id,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      if (!user) throw new Error('Usuário não autenticado');
+
+      const response = await fetch(N8N_SYNC_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: itemData.item.id,
+          userId: user.id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar com n8n');
+      }
+
+      return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      alert('✅ Banco conectado e sincronizado!');
+    },
+    onError: (error) => {
+      alert(`❌ Erro: ${error.message}`);
     },
   });
 
-  // Sincronizar transações
+  // Sincronizar transações (via n8n)
   const syncMutation = useMutation({
     mutationFn: async (connection) => {
-      const { data, error } = await supabase.functions.invoke('syncPluggyTransactions', {
-        body: { itemId: connection.pluggy_item_id, accountId: connection.pluggy_account_id }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuário não autenticado');
+
+      const response = await fetch(N8N_SYNC_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: connection.pluggy_item_id,
+          userId: user.id,
+        }),
       });
-      if (error) throw error;
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro ao sincronizar');
+
+      if (!response.ok) {
+        throw new Error('Erro ao sincronizar com n8n');
       }
-      return data;
+
+      return await response.json();
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      alert(`✅ ${data.imported || 0} transações importadas!`);
+      alert('✅ Sincronização concluída!');
     },
     onError: (error) => {
       alert(`❌ Erro: ${error.message}`);
@@ -100,7 +121,7 @@ export default function BankConnectionsNew() {
 
   const handleSuccess = (itemData) => {
     console.log('📦 Dados recebidos:', itemData);
-    createMutation.mutate(itemData);
+    connectMutation.mutate(itemData);
   };
 
   if (isLoading) {
@@ -128,10 +149,11 @@ export default function BankConnectionsNew() {
       <Alert className="border-blue-200 bg-blue-50">
         <AlertCircle className="h-4 w-4 text-blue-600" />
         <AlertDescription className="text-blue-900">
-          <strong>Pré-requisitos:</strong> Certifique-se de ter configurado os secrets 
-          <code className="mx-1 bg-blue-100 px-1 rounded">PLUGGY_CLIENT_ID</code> e 
-          <code className="mx-1 bg-blue-100 px-1 rounded">PLUGGY_CLIENT_SECRET</code> 
-          nas configurações do app.
+          <strong>Pré-requisitos:</strong> seus workflows do n8n precisam estar ativos:
+          <div className="mt-2 space-y-1">
+            <div><code className="bg-blue-100 px-1 rounded">/webhook/get-pluggy-token</code></div>
+            <div><code className="bg-blue-100 px-1 rounded">/webhook/sync-pluggy-data</code></div>
+          </div>
         </AlertDescription>
       </Alert>
 
