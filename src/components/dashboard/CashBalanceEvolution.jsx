@@ -1,23 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Dot } from 'recharts';
-import { format, subMonths, startOfMonth, endOfMonth, isSameMonth } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { TrendingUp, AlertCircle, HelpCircle } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { format, subMonths, startOfMonth, endOfMonth, isSameMonth, isAfter } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { TrendingUp, AlertCircle, HelpCircle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const formatCurrency = (value) => {
-  return new Intl.NumberFormat('pt-BR', {
+  return new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 0
+    maximumFractionDigits: 0,
   }).format(value);
 };
 
@@ -26,19 +19,14 @@ const CustomTooltip = ({ active, payload }) => {
     const data = payload[0].payload;
     return (
       <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3">
-        <p className="text-sm font-semibold text-slate-900 mb-1">
-          {data.fullMonth}
-        </p>
-        <p className={`text-lg font-bold ${
-          data.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'
-        }`}>
+        <p className="text-sm font-semibold text-slate-900 mb-1">{data.fullMonth}</p>
+        <p className={`text-lg font-bold ${data.balance >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
           R$ {formatCurrency(data.balance)}
         </p>
         {data.variation !== null && (
-          <p className={`text-xs mt-1 ${
-            data.variation >= 0 ? 'text-emerald-600' : 'text-rose-600'
-          }`}>
-            {data.variation >= 0 ? '+' : ''}{data.variation.toFixed(1)}% vs mês anterior
+          <p className={`text-xs mt-1 ${data.variation >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+            {data.variation >= 0 ? "+" : ""}
+            {data.variation.toFixed(1)}% vs mês anterior
           </p>
         )}
       </div>
@@ -49,139 +37,150 @@ const CustomTooltip = ({ active, payload }) => {
 
 const CustomDot = (props) => {
   const { cx, cy, payload } = props;
-  
+
   if (payload.isCurrentMonth) {
     return (
       <g>
-        <circle 
-          cx={cx} 
-          cy={cy} 
-          r={8} 
-          fill="#3b82f6"
-          stroke="#fff"
-          strokeWidth={3}
-        />
-        <circle 
-          cx={cx} 
-          cy={cy} 
-          r={4} 
-          fill="#fff"
-        />
+        <circle cx={cx} cy={cy} r={8} fill="#3b82f6" stroke="#fff" strokeWidth={3} />
+        <circle cx={cx} cy={cy} r={4} fill="#fff" />
       </g>
     );
   }
-  
+
   return (
-    <circle 
-      cx={cx} 
-      cy={cy} 
-      r={5} 
-      fill={payload.balance >= 0 ? '#10b981' : '#ef4444'}
-      stroke="#fff"
-      strokeWidth={2}
-    />
+    <circle cx={cx} cy={cy} r={5} fill={payload.balance >= 0 ? "#10b981" : "#ef4444"} stroke="#fff" strokeWidth={2} />
   );
 };
 
-function CashBalanceEvolution({ transactions }) {
+// Adicionei 'accounts' nas props para pegar o saldo atual real
+function CashBalanceEvolution({ transactions, accounts = [] }) {
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [showTrendDialog, setShowTrendDialog] = useState(false);
 
   const chartData = useMemo(() => {
+    // 1. Calcula o saldo TOTAL ATUAL somando todas as contas (Dado mais confiável)
+    const currentTotalBalance = accounts.reduce((acc, account) => {
+      return acc + (Number(account.balance) || 0);
+    }, 0);
+
     const now = new Date();
     const data = [];
-    
-    for (let i = 11; i >= 0; i--) {
+
+    // Vamos criar os pontos de corte (final de cada mês)
+    const monthsPoints = [];
+    for (let i = 0; i < 12; i++) {
       const date = subMonths(now, i);
-      const monthStart = startOfMonth(date);
-      const monthEnd = endOfMonth(date);
-      const isCurrentMonth = isSameMonth(date, now);
-      
-      // Calcula saldo final do mês (todas as transações até o fim do mês)
-      const balance = transactions
-        .filter(t => new Date(t.date) <= monthEnd)
-        .reduce((sum, t) => {
-          return sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount));
-        }, 0);
-      
-      data.push({
-        month: format(date, 'MMM', { locale: ptBR }),
-        fullMonth: format(date, "MMMM 'de' yyyy", { locale: ptBR }),
-        balance: balance,
-        isCurrentMonth: isCurrentMonth,
-        variation: null // Será calculado depois
+      monthsPoints.push({
+        date: date,
+        monthEnd: endOfMonth(date),
+        isCurrentMonth: i === 0,
+        label: format(date, "MMM", { locale: ptBR }),
+        fullLabel: format(date, "MMMM 'de' yyyy", { locale: ptBR }),
       });
     }
-    
-    // Calcula variação percentual vs mês anterior
-    for (let i = 1; i < data.length; i++) {
-      const current = data[i].balance;
-      const previous = data[i - 1].balance;
-      
-      if (previous !== 0) {
-        data[i].variation = ((current - previous) / Math.abs(previous)) * 100;
+    // Ordena do mais antigo para o mais novo para o gráfico
+    monthsPoints.reverse();
+
+    // LÓGICA REVERSA:
+    // Começamos com o saldo de hoje e vamos desfazendo as transações para achar o passado.
+    let runningBalance = currentTotalBalance;
+
+    // Primeiro, precisamos "voltar" do momento exato de "agora" até o fim do mês atual (se houver transações futuras)
+    // ou simplesmente considerar o saldo atual como o saldo do mês corrente.
+
+    // Vamos processar mês a mês, do mais recente (último do array) para o mais antigo
+    const calculatedData = [...monthsPoints].reverse().map((point, index) => {
+      const isLastPoint = index === 0; // Mês atual
+
+      let balanceAtPoint = 0;
+
+      if (isLastPoint) {
+        // O saldo do mês atual é o saldo atual (simples assim)
+        balanceAtPoint = currentTotalBalance;
       } else {
-        data[i].variation = current > 0 ? 100 : (current < 0 ? -100 : 0); // Handle division by zero previous balance
+        // Para meses passados, o saldo é:
+        // Saldo do Mês Seguinte - (Receitas do Mês Seguinte) + (Despesas do Mês Seguinte)
+        // Basicamente: runningBalance já está no ponto certo do mês seguinte.
+        // Precisamos desfazer as transações que ocorreram ENTRE o fim deste mês e o fim do mês seguinte.
+
+        const nextPointDate = monthsPoints.reverse()[index - 1].monthEnd; // Data do ponto que acabamos de calcular
+        const thisPointDate = point.monthEnd; // Data onde queremos chegar
+
+        // Pega transações que aconteceram nesse intervalo
+        const transactionsInInterval = transactions.filter((t) => {
+          const tDate = new Date(t.date);
+          return isAfter(tDate, thisPointDate) && tDate <= nextPointDate;
+        });
+
+        // Desfaz as transações para voltar no tempo
+        // Se foi receita (+), subtrai. Se foi despesa (-), soma.
+        const changeInInterval = transactionsInInterval.reduce((acc, t) => {
+          return acc + (t.type === "income" ? t.amount : -Math.abs(t.amount));
+        }, 0);
+
+        runningBalance = runningBalance - changeInInterval;
+        balanceAtPoint = runningBalance;
+      }
+
+      return {
+        month: point.label,
+        fullMonth: point.fullLabel,
+        balance: balanceAtPoint,
+        isCurrentMonth: point.isCurrentMonth,
+        variation: null,
+      };
+    });
+
+    // Inverte de volta para ordem cronológica (Jan -> Dez)
+    const finalData = calculatedData.reverse();
+
+    // Calcula variação percentual vs mês anterior
+    for (let i = 1; i < finalData.length; i++) {
+      const current = finalData[i].balance;
+      const previous = finalData[i - 1].balance;
+
+      if (previous !== 0) {
+        finalData[i].variation = ((current - previous) / Math.abs(previous)) * 100;
+      } else {
+        finalData[i].variation = current > 0 ? 100 : current < 0 ? -100 : 0;
       }
     }
-    
-    return data;
-  }, [transactions]);
+
+    return finalData;
+  }, [transactions, accounts]);
 
   const trend = useMemo(() => {
-    if (chartData.length < 2) return 'neutral';
+    if (chartData.length < 2) return "neutral";
     const lastMonth = chartData[chartData.length - 1].balance;
     const previousMonth = chartData[chartData.length - 2].balance;
-    return lastMonth >= previousMonth ? 'up' : 'down';
+    return lastMonth >= previousMonth ? "up" : "down";
   }, [chartData]);
 
   const currentBalance = chartData[chartData.length - 1]?.balance || 0;
   const currentDate = format(new Date(), "dd/MM/yyyy");
 
-  // Gera explicação detalhada da tendência
   const trendExplanation = useMemo(() => {
-    if (chartData.length < 2) return '';
-    
+    if (chartData.length < 2) return { summary: "", details: "" };
+
     const lastMonth = chartData[chartData.length - 1];
     const previousMonth = chartData[chartData.length - 2];
     const firstMonth = chartData[0];
-    
+
     const monthChange = lastMonth.balance - previousMonth.balance;
     const yearChange = lastMonth.balance - firstMonth.balance;
-    
-    const isGrowing = trend === 'up';
-    
-    let summary = '';
-    let details = '';
-    
+    const isGrowing = trend === "up";
+
+    let summary = isGrowing ? "📈 Situação Positiva" : "📉 Atenção Necessária";
+    let details = isGrowing ? `Seu caixa está crescendo! ` : `Seu caixa está em declínio. `;
+
     if (isGrowing) {
-      summary = '📈 Situação Positiva';
-      details = `Seu caixa está crescendo! `;
-      
-      if (monthChange > 0) {
-        details += `No último mês, você aumentou seu saldo em R$ ${formatCurrency(monthChange)}. `;
-      }
-      
-      if (yearChange > 0) {
-        details += `Em 12 meses, seu caixa cresceu R$ ${formatCurrency(yearChange)}. `;
-      }
-      
-      details += `Isso indica que suas receitas estão superando suas despesas. Continue assim! 💪`;
+      if (monthChange > 0) details += `No último mês, aumentou R$ ${formatCurrency(monthChange)}. `;
+      if (yearChange > 0) details += `Em 12 meses, cresceu R$ ${formatCurrency(yearChange)}. `;
     } else {
-      summary = '📉 Atenção Necessária';
-      details = `Seu caixa está em declínio. `;
-      
-      if (monthChange < 0) {
-        details += `No último mês, você teve uma redução de R$ ${formatCurrency(Math.abs(monthChange))}. `;
-      }
-      
-      if (yearChange < 0) {
-        details += `Em 12 meses, seu caixa diminuiu R$ ${formatCurrency(Math.abs(yearChange))}. `;
-      }
-      
-      details += `Isso pode indicar que as despesas estão superando as receitas. Recomendamos revisar seus custos e buscar formas de aumentar a receita. 🎯`;
+      if (monthChange < 0) details += `No último mês, reduziu R$ ${formatCurrency(Math.abs(monthChange))}. `;
+      if (yearChange < 0) details += `Em 12 meses, diminuiu R$ ${formatCurrency(Math.abs(yearChange))}. `;
     }
-    
+
     return { summary, details };
   }, [chartData, trend]);
 
@@ -207,20 +206,18 @@ function CashBalanceEvolution({ transactions }) {
                 variant="ghost"
                 size="sm"
                 className={`px-2 py-1 h-auto ${
-                  trend === 'up' 
-                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' 
-                    : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                  trend === "up"
+                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                    : "bg-rose-100 text-rose-700 hover:bg-rose-200"
                 }`}
                 onClick={() => setShowTrendDialog(true)}
               >
-                {trend === 'up' ? (
+                {trend === "up" ? (
                   <TrendingUp className="w-3 h-3 mr-1" />
                 ) : (
                   <TrendingUp className="w-3 h-3 mr-1 rotate-180" />
                 )}
-                <span className="text-xs font-semibold">
-                  {trend === 'up' ? 'Crescimento' : 'Declínio'}
-                </span>
+                <span className="text-xs font-semibold">{trend === "up" ? "Crescimento" : "Declínio"}</span>
               </Button>
             </div>
           </div>
@@ -233,7 +230,7 @@ function CashBalanceEvolution({ transactions }) {
                 <strong>Saldo atual:</strong> R$ {formatCurrency(currentBalance)}
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                Atualizado até {currentDate}. Clique nos pontos para ver detalhes de cada mês.
+                Atualizado até {currentDate} (Baseado no saldo real das contas).
               </p>
             </div>
           </div>
@@ -241,28 +238,21 @@ function CashBalanceEvolution({ transactions }) {
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis 
-                dataKey="month" 
-                stroke="#64748b" 
-                style={{ fontSize: '11px' }}
-                tick={{ fill: '#64748b' }}
-              />
-              <YAxis 
-                stroke="#64748b" 
-                style={{ fontSize: '11px' }}
-                tickFormatter={(value) => {
-                  const absValue = Math.abs(value);
-                  if (absValue >= 1000) {
-                    return `${value >= 0 ? '' : '-'}${(absValue / 1000).toFixed(0)}k`;
-                  }
-                  return value.toFixed(0);
-                }}
-                tick={{ fill: '#64748b' }}
+              <XAxis dataKey="month" stroke="#64748b" style={{ fontSize: "11px" }} tick={{ fill: "#64748b" }} />
+              <YAxis
+                stroke="#64748b"
+                style={{ fontSize: "11px" }}
+                tickFormatter={(value) =>
+                  Math.abs(value) >= 1000
+                    ? `${value >= 0 ? "" : "-"}${(Math.abs(value) / 1000).toFixed(0)}k`
+                    : value.toFixed(0)
+                }
+                tick={{ fill: "#64748b" }}
               />
               <Tooltip content={<CustomTooltip />} />
-              <Line 
-                type="monotone" 
-                dataKey="balance" 
+              <Line
+                type="monotone"
+                dataKey="balance"
                 stroke="#3b82f6"
                 strokeWidth={3}
                 dot={<CustomDot />}
@@ -274,105 +264,41 @@ function CashBalanceEvolution({ transactions }) {
           <div className="flex items-center justify-center gap-4 mt-4 text-xs text-slate-600">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-              <span>Saldo Positivo</span>
+              <span>Positivo</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-rose-500"></div>
-              <span>Saldo Negativo</span>
+              <span>Negativo</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-blue-600 border-2 border-white"></div>
-              <span>Mês Atual</span>
+              <span>Atual</span>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Dialog de Informação - O que é este gráfico */}
       <Dialog open={showInfoDialog} onOpenChange={setShowInfoDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <HelpCircle className="w-5 h-5 text-blue-600" />
-              O que é a Evolução do Caixa?
+              <HelpCircle className="w-5 h-5 text-blue-600" />O que é a Evolução do Caixa?
             </DialogTitle>
           </DialogHeader>
-          
           <div className="space-y-4">
-            <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-slate-700 leading-relaxed">
-                Este gráfico mostra a <strong>posição do seu caixa no final de cada mês</strong> durante os últimos 12 meses.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-lg">📊</span>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                    Saldo Final do Mês
-                  </h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Cada ponto no gráfico representa o valor total que você tinha em caixa no último dia do mês.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-lg">💰</span>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                    Como é calculado?
-                  </h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Soma todas as receitas e subtrai todas as despesas até o último dia do mês, mostrando quanto você tinha disponível.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-lg">📈</span>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-sm text-slate-900 mb-1">
-                    Para que serve?
-                  </h4>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Ver se seu caixa está crescendo (guardando dinheiro) ou diminuindo (gastando reservas) ao longo do tempo.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-900 leading-relaxed">
-                  <strong>Dica:</strong> Um caixa crescente indica que você está guardando dinheiro. Um caixa em queda pode indicar que está gastando mais do que ganha.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <Button onClick={() => setShowInfoDialog(false)}>
-              Entendi
-            </Button>
+            <p className="text-sm text-slate-700">
+              Este gráfico mostra seu saldo histórico calculado de forma reversa: partimos do seu saldo real hoje e
+              "desfazemos" as transações para descobrir quanto você tinha no passado.
+            </p>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog de Tendência - Explicação do crescimento/declínio */}
       <Dialog open={showTrendDialog} onOpenChange={setShowTrendDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              {trend === 'up' ? (
+              {trend === "up" ? (
                 <TrendingUp className="w-5 h-5 text-emerald-600" />
               ) : (
                 <TrendingUp className="w-5 h-5 text-rose-600 rotate-180" />
@@ -380,79 +306,7 @@ function CashBalanceEvolution({ transactions }) {
               {trendExplanation.summary}
             </DialogTitle>
           </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className={`rounded-lg p-4 border ${
-              trend === 'up' 
-                ? 'bg-emerald-50 border-emerald-200' 
-                : 'bg-rose-50 border-rose-200'
-            }`}>
-              <p className="text-sm text-slate-700 leading-relaxed">
-                {trendExplanation.details}
-              </p>
-            </div>
-
-            {trend === 'up' ? (
-              <div className="space-y-3">
-                <h4 className="font-semibold text-sm text-slate-900">
-                  🎯 Continue fazendo:
-                </h4>
-                <ul className="space-y-2 text-xs text-slate-600">
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-0.5">✓</span>
-                    <span>Mantendo o controle das despesas</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-0.5">✓</span>
-                    <span>Buscando aumentar suas receitas</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-emerald-600 mt-0.5">✓</span>
-                    <span>Construindo uma reserva financeira sólida</span>
-                  </li>
-                </ul>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <h4 className="font-semibold text-sm text-slate-900">
-                  💡 Ações recomendadas:
-                </h4>
-                <ul className="space-y-2 text-xs text-slate-600">
-                  <li className="flex items-start gap-2">
-                    <span className="text-rose-600 mt-0.5">•</span>
-                    <span>Revise e reduza despesas desnecessárias</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-rose-600 mt-0.5">•</span>
-                    <span>Busque formas de aumentar suas receitas</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-rose-600 mt-0.5">•</span>
-                    <span>Analise onde seu dinheiro está sendo gasto</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-rose-600 mt-0.5">•</span>
-                    <span>Converse com o Flávio (Assistente IA) para dicas personalizadas</span>
-                  </li>
-                </ul>
-              </div>
-            )}
-
-            <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-blue-900 leading-relaxed">
-                  <strong>Lembre-se:</strong> A evolução do caixa é apenas um indicador. Analise também suas receitas, despesas e fluxo de caixa mensal para ter uma visão completa.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <Button onClick={() => setShowTrendDialog(false)}>
-              Fechar
-            </Button>
-          </div>
+          <div className="p-4 bg-slate-50 rounded-lg text-sm text-slate-700">{trendExplanation.details}</div>
         </DialogContent>
       </Dialog>
     </>
