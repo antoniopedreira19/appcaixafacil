@@ -59,43 +59,6 @@ const navigationItems = [
     url: createPageUrl("ManageBankAccounts"),
     icon: Building2,
   },
-  {
-    title: "Despesas Recorrentes",
-    url: createPageUrl("RecurringExpenses"),
-    icon: Repeat,
-  },
-  {
-    title: "Assistente IA",
-    url: createPageUrl("AIAssistant"),
-    icon: Brain,
-    badge: "IA",
-    badgeColor: "bg-purple-600"
-  },
-  {
-    title: "Conexões Bancárias",
-    url: createPageUrl("BankConnectionsNew"),
-    icon: Building2,
-  },
-  {
-    title: "Importar Extrato",
-    url: createPageUrl("UploadStatement"),
-    icon: Upload,
-  },
-  {
-    title: "Relatórios",
-    url: createPageUrl("Reports"),
-    icon: BarChart3,
-  },
-  {
-    title: "Conteúdos",
-    url: createPageUrl("Content"),
-    icon: BookOpen,
-  },
-  {
-    title: "Notificações",
-    url: createPageUrl("NotificationSettings"),
-    icon: Bell,
-  },
 ];
 
 function SidebarContentComponent({ user, onLogout }) {
