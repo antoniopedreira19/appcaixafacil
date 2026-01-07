@@ -7,7 +7,10 @@ const N8N_TOKEN_WEBHOOK = 'https://grifoworkspace.app.n8n.cloud/webhook/get-plug
 
 const isInIframe = () => {
   try {
-    return window.self !== window.top;
+    // Verifica se está em iframe E se é o preview do Lovable
+    const inIframe = window.self !== window.top;
+    const isLovablePreview = window.location.hostname.includes('lovableproject.com');
+    return inIframe && isLovablePreview;
   } catch {
     return true;
   }
