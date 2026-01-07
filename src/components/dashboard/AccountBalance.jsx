@@ -4,8 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Eye, EyeOff, TrendingUp, TrendingDown, HelpCircle, RefreshCw, Loader2, Building2 } from "lucide-react";
-import { subMonths, isAfter } from "date-fns"; // Removido startOfMonth, endOfMonth desnecessários
-import { format } from "date-fns";
+import { subMonths, isAfter, format } from "date-fns";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { toast } from "sonner";
@@ -21,7 +20,7 @@ export default function AccountBalance({
   balance,
   selectedAccount,
   onAccountChange,
-  accounts,
+  accounts = [],
   showBalance,
   onToggleBalance,
   transactions = [],
@@ -32,6 +31,13 @@ export default function AccountBalance({
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDisabled, setIsDisabled] = useState(false);
+
+  // Helper para pegar o nome da conta selecionada
+  const getSelectedAccountName = () => {
+    if (selectedAccount === "all") return accounts.length === 1 ? accounts[0]?.name : "Todas as contas";
+    const account = accounts.find((a) => a.pluggy_account_id === selectedAccount || a.id === selectedAccount);
+    return account ? account.name : "Conta Selecionada";
+  };
 
   const handleRefreshData = async () => {
     const connection = bankConnections?.[0];
@@ -65,33 +71,27 @@ export default function AccountBalance({
     }
   };
 
-  // Lógica Reversa também para o comparativo "vs mês anterior"
   const previousMonthComparison = useMemo(() => {
     const now = new Date();
-    const currentDay = now.getDate();
-
-    // Data alvo: Mesmo dia do mês passado
     const previousMonthDate = subMonths(now, 1);
 
-    // Filtra transações da conta selecionada
+    // Filtra transações: Se "all", pega tudo. Se não, filtra pelo ID da conta.
+    // IMPORTANTE: Verifique se sua transação usa 'account_id' ou 'bank_account' para guardar o ID
     const filteredTransactions =
-      selectedAccount === "all" ? transactions : transactions.filter((t) => t.bank_account === selectedAccount);
+      selectedAccount === "all"
+        ? transactions
+        : transactions.filter((t) => (t.account_id || t.bank_account) === selectedAccount);
 
-    // Filtra transações que aconteceram DEPOIS da data alvo até HOJE
-    // Essas são as transações que precisamos "desfazer"
     const transactionsSinceThen = filteredTransactions.filter((t) => {
       const tDate = new Date(t.date);
       return isAfter(tDate, previousMonthDate) && tDate <= now;
     });
 
-    // Calcula a variação financeira nesse período
     const changeInPeriod = transactionsSinceThen.reduce((acc, t) => {
       return acc + (t.type === "income" ? t.amount : -Math.abs(t.amount));
     }, 0);
 
-    // Saldo Anterior = Saldo Atual - (Mudança no período)
     const previousBalance = balance - changeInPeriod;
-
     const variation =
       previousBalance !== 0 ? ((balance - previousBalance) / Math.abs(previousBalance)) * 100 : balance > 0 ? 100 : 0;
 
@@ -101,7 +101,7 @@ export default function AccountBalance({
       isPositive: variation >= 0,
       previousDate: previousMonthDate,
     };
-  }, [transactions, selectedAccount, balance]); // Depende do balance atual que vem via prop (confiável)
+  }, [transactions, selectedAccount, balance]);
 
   const handleInfoClick = (e) => {
     e.preventDefault();
@@ -197,16 +197,18 @@ export default function AccountBalance({
 
           <Select value={selectedAccount} onValueChange={onAccountChange}>
             <SelectTrigger className="bg-emerald-400/30 border-0 text-white hover:bg-emerald-400/40 h-8 text-sm">
-              <SelectValue />
+              <SelectValue>{getSelectedAccountName()}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">{accounts.length === 1 ? accounts[0] : "Todas as contas"}</SelectItem>
-              {accounts.length > 1 &&
-                accounts.map((account) => (
-                  <SelectItem key={account} value={account}>
-                    {account}
-                  </SelectItem>
-                ))}
+              <SelectItem value="all">Todas as contas</SelectItem>
+              {accounts.map((account) => (
+                <SelectItem
+                  key={account.id || account.pluggy_account_id}
+                  value={account.pluggy_account_id || account.id}
+                >
+                  {account.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
