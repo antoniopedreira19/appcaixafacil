@@ -1,6 +1,6 @@
-import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import React, { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -17,16 +17,10 @@ export default function NotificationSettings() {
 
   const { data: user, isLoading } = useQuery({
     queryKey: ['user'],
-    queryFn: () => base44.auth.me(),
-  });
-
-  const updateUserMutation = useMutation({
-    mutationFn: (userData) => base44.auth.updateMe(userData),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user'] });
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
-    }
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    },
   });
 
   const [preferences, setPreferences] = useState({
@@ -35,28 +29,34 @@ export default function NotificationSettings() {
     report_day_of_week: 1,
     report_day_of_month: 1,
     expense_reminders: true,
-    ...user?.notification_preferences
   });
 
-  React.useEffect(() => {
-    if (user?.notification_preferences) {
-      setPreferences({
-        email_reports: true,
-        report_frequency: 'monthly',
-        report_day_of_week: 1,
-        report_day_of_month: 1,
-        expense_reminders: true,
-        ...user.notification_preferences
-      });
+  useEffect(() => {
+    // Load preferences from localStorage or user metadata
+    const savedPrefs = localStorage.getItem('notification_preferences');
+    if (savedPrefs) {
+      try {
+        setPreferences({
+          email_reports: true,
+          report_frequency: 'monthly',
+          report_day_of_week: 1,
+          report_day_of_month: 1,
+          expense_reminders: true,
+          ...JSON.parse(savedPrefs)
+        });
+      } catch (e) {
+        console.error('Error parsing preferences:', e);
+      }
     }
-  }, [user]);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateUserMutation.mutateAsync({
-        notification_preferences: preferences
-      });
+      // Save to localStorage (or could save to a user_preferences table)
+      localStorage.setItem('notification_preferences', JSON.stringify(preferences));
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
     } catch (error) {
       console.error('Error saving preferences:', error);
       alert('Erro ao salvar preferências. Tente novamente.');
