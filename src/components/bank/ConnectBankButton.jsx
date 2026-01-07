@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Loader2, Link as LinkIcon, RefreshCw, AlertTriangle, CheckCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function ConnectBankButton({ onSuccess }) {
   const [loading, setLoading] = useState(false);
@@ -77,29 +77,30 @@ SOLUÇÕES:
       }
 
       console.log('🔑 Solicitando token...');
-      const response = await base44.functions.invoke('createPluggyConnectToken', {});
+      const { data, error: fnError } = await supabase.functions.invoke('createPluggyConnectToken', {});
 
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || 'Erro ao criar token');
+      if (fnError) throw fnError;
+      if (!data?.success) {
+        throw new Error(data?.error || 'Erro ao criar token');
       }
 
-      if (!response.data.connectToken) {
+      if (!data.connectToken) {
         throw new Error('Token não foi retornado');
       }
 
       console.log('✅ Token obtido');
 
       const pluggyConnect = new window.PluggyConnect({
-        connectToken: response.data.connectToken,
+        connectToken: data.connectToken,
         includeSandbox: false,
         onSuccess: async (itemData) => {
           console.log('✅ Banco conectado!', itemData);
           if (onSuccess) await onSuccess(itemData);
           setLoading(false);
         },
-        onError: (error) => {
-          console.error('❌ Erro:', error);
-          setError('Erro ao conectar: ' + (error?.message || 'Tente novamente'));
+        onError: (err) => {
+          console.error('❌ Erro:', err);
+          setError('Erro ao conectar: ' + (err?.message || 'Tente novamente'));
           setLoading(false);
         },
         onClose: () => {

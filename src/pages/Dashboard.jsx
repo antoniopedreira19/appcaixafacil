@@ -1,16 +1,16 @@
 import React, { useState, useMemo, lazy, Suspense } from "react";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle, Calendar, TrendingUp, BarChart3 } from "lucide-react";
-import { format, subMonths, startOfMonth, endOfMonth, startOfDay, endOfDay, startOfYear, endOfYear, subYears } from "date-fns";
+import { format, subMonths, startOfMonth, endOfMonth, startOfDay, endOfDay, startOfYear, endOfYear } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import AccountBalance from "../components/dashboard/AccountBalance";
 import MonthSummaryCards from "../components/dashboard/MonthSummaryCards";
@@ -18,7 +18,6 @@ import RecentTransactions from "../components/dashboard/RecentTransactions";
 import ExpandedTransactionList from "../components/dashboard/ExpandedTransactionList";
 import CashBalanceEvolution from "../components/dashboard/CashBalanceEvolution";
 
-// Lazy load componentes pesados
 const MonthlyAnalysisTable = lazy(() => import("../components/dashboard/MonthlyAnalysisTable"));
 
 export default function Dashboard() {
@@ -36,28 +35,39 @@ export default function Dashboard() {
 
   const { data: transactions, isLoading: loadingTransactions } = useQuery({
     queryKey: ['transactions'],
-    queryFn: () => base44.entities.Transaction.list('-date'),
-    initialData: [],
-  });
-
-  const { data: recurringExpenses, isLoading: loadingRecurring } = useQuery({
-    queryKey: ['recurring-expenses'],
-    queryFn: () => base44.entities.RecurringExpense.list('-due_day'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
   const { data: bankConnections, isLoading: loadingConnections } = useQuery({
     queryKey: ['bank-connections'],
-    queryFn: () => base44.entities.BankConnection.list('-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
   const { data: user } = useQuery({
     queryKey: ['user'],
-    queryFn: () => base44.auth.me(),
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user;
+    },
   });
 
-  const isLoading = loadingTransactions || loadingRecurring || loadingConnections;
+  const isLoading = loadingTransactions || loadingConnections;
 
   const handleRefreshData = () => {
     queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -66,64 +76,36 @@ export default function Dashboard() {
 
   const monthOptions = useMemo(() => {
     const options = [];
-    
-    // Adiciona apenas ano atual e ano passado
     const currentYear = new Date().getFullYear();
     
-    // Ano atual
     options.push({
       value: `year_${currentYear}`,
       label: `📅 Ano Completo ${currentYear}`,
-      shortLabel: `${currentYear}`,
       date: null,
       isYear: true,
       year: currentYear
     });
     
-    // Ano passado
     options.push({
       value: `year_${currentYear - 1}`,
       label: `📅 Ano Completo ${currentYear - 1}`,
-      shortLabel: `${currentYear - 1}`,
       date: null,
       isYear: true,
       year: currentYear - 1
     });
     
-    // Adiciona separador visual
-    options.push({
-      value: 'separator_1',
-      label: '───────────────',
-      shortLabel: '───',
-      date: null,
-      disabled: true
-    });
-    
-    // Adiciona meses individuais
     for (let i = 0; i < 12; i++) {
       const date = subMonths(new Date(), i);
       options.push({
         value: i.toString(),
         label: format(date, "MMMM 'de' yyyy", { locale: ptBR }),
-        shortLabel: format(date, "MMMM", { locale: ptBR }),
         date: date
       });
     }
     
-    // Adiciona separador visual
-    options.push({
-      value: 'separator_2',
-      label: '───────────────',
-      shortLabel: '───',
-      date: null,
-      disabled: true
-    });
-    
-    // Adiciona opção personalizada
     options.push({
       value: 'custom',
       label: '🎯 Personalizar período...',
-      shortLabel: 'Personalizado',
       date: null
     });
     
@@ -133,8 +115,8 @@ export default function Dashboard() {
   const accounts = useMemo(() => {
     const accountSet = new Set();
     transactions.forEach(t => {
-      if (t.bank_account) {
-        accountSet.add(t.bank_account);
+      if (t.account_id) {
+        accountSet.add(t.account_id);
       }
     });
     return Array.from(accountSet);
@@ -147,12 +129,10 @@ export default function Dashboard() {
       start = startOfDay(new Date(customPeriod.startDate));
       end = endOfDay(new Date(customPeriod.endDate));
     } else if (selectedMonth.startsWith('year_')) {
-      // Filtro de ano completo
       const year = parseInt(selectedMonth.replace('year_', ''));
       start = startOfYear(new Date(year, 0, 1));
       end = endOfYear(new Date(year, 11, 31));
     } else {
-      // Filtro de mês individual
       const monthsBack = parseInt(selectedMonth);
       const selectedDate = subMonths(new Date(), monthsBack);
       start = startOfMonth(selectedDate);
@@ -162,21 +142,17 @@ export default function Dashboard() {
     const filtered = transactions.filter(t => {
       const date = new Date(t.date);
       const dateMatch = date >= start && date <= end;
-      const accountMatch = selectedAccount === "all" || t.bank_account === selectedAccount;
+      const accountMatch = selectedAccount === "all" || t.account_id === selectedAccount;
       return dateMatch && accountMatch;
     });
 
-    return {
-      filteredTransactions: filtered,
-      periodStart: start,
-      periodEnd: end
-    };
+    return { filteredTransactions: filtered, periodStart: start, periodEnd: end };
   }, [transactions, selectedMonth, selectedAccount, customPeriod]);
 
   const totalBalance = useMemo(() => {
     const filteredByAccount = selectedAccount === "all" 
       ? transactions 
-      : transactions.filter(t => t.bank_account === selectedAccount);
+      : transactions.filter(t => t.account_id === selectedAccount);
     
     return filteredByAccount.reduce((sum, t) => {
       return sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount));
@@ -186,19 +162,15 @@ export default function Dashboard() {
   const { initialBalance, finalBalance, periodLabel } = useMemo(() => {
     const filteredByAccount = selectedAccount === "all" 
       ? transactions 
-      : transactions.filter(t => t.bank_account === selectedAccount);
+      : transactions.filter(t => t.account_id === selectedAccount);
     
     const initial = filteredByAccount
       .filter(t => new Date(t.date) < periodStart)
-      .reduce((sum, t) => {
-        return sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount));
-      }, 0);
+      .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount)), 0);
     
     const final = filteredByAccount
       .filter(t => new Date(t.date) <= periodEnd)
-      .reduce((sum, t) => {
-        return sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount));
-      }, 0);
+      .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -Math.abs(t.amount)), 0);
     
     let label;
     if (customPeriod) {
@@ -206,18 +178,12 @@ export default function Dashboard() {
       const endFormatted = format(periodEnd, "MMM/yy", { locale: ptBR });
       label = startFormatted === endFormatted ? startFormatted : `${startFormatted} a ${endFormatted}`;
     } else if (selectedMonth.startsWith('year_')) {
-      // Label para ano completo
-      const year = selectedMonth.replace('year_', '');
-      label = `Ano ${year}`;
+      label = `Ano ${selectedMonth.replace('year_', '')}`;
     } else {
       label = format(periodStart, "MMM/yy", { locale: ptBR });
     }
     
-    return {
-      initialBalance: initial,
-      finalBalance: final,
-      periodLabel: label
-    };
+    return { initialBalance: initial, finalBalance: final, periodLabel: label };
   }, [transactions, selectedAccount, periodStart, periodEnd, customPeriod, selectedMonth]);
 
   const monthStats = useMemo(() => {
@@ -229,11 +195,7 @@ export default function Dashboard() {
       .filter(t => t.type === 'expense')
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
     
-    return {
-      income,
-      expense,
-      balance: income - expense
-    };
+    return { income, expense, balance: income - expense };
   }, [filteredTransactions]);
 
   const handleToggleCard = (type) => {
@@ -243,9 +205,6 @@ export default function Dashboard() {
   const handleMonthChange = (value) => {
     if (value === 'custom') {
       setCustomDialogOpen(true);
-    } else if (value.startsWith('separator_')) {
-      // Ignora cliques nos separadores
-      return;
     } else {
       setCustomPeriod(null);
       setSelectedMonth(value);
@@ -258,13 +217,8 @@ export default function Dashboard() {
     setCustomDialogOpen(false);
   };
 
-  const incomeTransactions = useMemo(() => {
-    return filteredTransactions.filter(t => t.type === 'income');
-  }, [filteredTransactions]);
-
-  const expenseTransactions = useMemo(() => {
-    return filteredTransactions.filter(t => t.type === 'expense');
-  }, [filteredTransactions]);
+  const incomeTransactions = useMemo(() => filteredTransactions.filter(t => t.type === 'income'), [filteredTransactions]);
+  const expenseTransactions = useMemo(() => filteredTransactions.filter(t => t.type === 'expense'), [filteredTransactions]);
 
   if (isLoading) {
     return (
@@ -315,12 +269,7 @@ export default function Dashboard() {
               </SelectTrigger>
               <SelectContent>
                 {monthOptions.map(option => (
-                  <SelectItem 
-                    key={option.value} 
-                    value={option.value}
-                    disabled={option.disabled}
-                    className={option.disabled ? 'text-slate-300 cursor-default' : ''}
-                  >
+                  <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
                 ))}
@@ -363,14 +312,12 @@ export default function Dashboard() {
             <Alert className="border-blue-200 bg-blue-50">
               <AlertCircle className="h-4 w-4 text-blue-600" />
               <AlertDescription className="text-blue-900">
-                <strong>Comece agora!</strong> Importe um extrato bancário ou adicione transações manualmente para visualizar seus dados.
+                <strong>Comece agora!</strong> Importe um extrato bancário ou adicione transações manualmente.
               </AlertDescription>
             </Alert>
           )}
 
-          {transactions.length > 0 && (
-            <CashBalanceEvolution transactions={transactions} />
-          )}
+          {transactions.length > 0 && <CashBalanceEvolution transactions={transactions} />}
 
           <RecentTransactions transactions={transactions} />
         </TabsContent>
@@ -385,22 +332,17 @@ export default function Dashboard() {
             <Alert className="border-orange-200 bg-orange-50">
               <AlertCircle className="h-4 w-4 text-orange-600" />
               <AlertDescription className="text-orange-900">
-                <strong>Adicione transações</strong> para visualizar análises e projeções financeiras avançadas.
+                <strong>Adicione transações</strong> para visualizar análises avançadas.
               </AlertDescription>
             </Alert>
           ) : (
-            <Suspense fallback={
-              <div className="space-y-3">
-                <Skeleton className="h-96 w-full" />
-              </div>
-            }>
+            <Suspense fallback={<Skeleton className="h-96 w-full" />}>
               <MonthlyAnalysisTable transactions={transactions} />
             </Suspense>
           )}
         </TabsContent>
       </Tabs>
 
-      {/* Dialog para período personalizado */}
       <Dialog open={customDialogOpen} onOpenChange={setCustomDialogOpen}>
         <DialogContent>
           <DialogHeader>

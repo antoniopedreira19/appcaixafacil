@@ -1,6 +1,5 @@
-
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +48,6 @@ const CATEGORY_NAMES = {
   outras_despesas: "Outras Despesas"
 };
 
-// Função para formatar valor com ponto para milhares e vírgula para decimal
 const formatCurrency = (value) => {
   return new Intl.NumberFormat('pt-BR', {
     minimumFractionDigits: 2,
@@ -62,7 +60,6 @@ export default function Transactions() {
   const [open, setOpen] = useState(false);
   const [filterType, setFilterType] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
-  const [undoDialogOpen, setUndoDialogOpen] = useState(false);
   
   const [formData, setFormData] = useState({
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -70,71 +67,32 @@ export default function Transactions() {
     amount: "",
     type: "expense",
     category: "",
-    payment_method: "pix",
     notes: "",
-    recurring: false
   });
 
   const { data: transactions, isLoading } = useQuery({
     queryKey: ['transactions'],
-    queryFn: () => base44.entities.Transaction.list('-date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
     initialData: [],
   });
 
-  // Identifica a última importação de forma mais simples
-  const lastImport = React.useMemo(() => {
-    // Filtra todas as transações importadas (que têm "Importado" nas notas)
-    const importedTransactions = transactions.filter(t => 
-      t.notes && (
-        t.notes.includes('Importado do extrato CSV em') ||
-        t.notes.includes('Importado em') ||
-        t.notes.includes('Importado via Pluggy')
-      )
-    );
-    
-    if (importedTransactions.length === 0) return null;
-    
-    // Agrupa por texto exato da nota
-    const groups = {};
-    importedTransactions.forEach(t => {
-      const noteKey = t.notes;
-      if (!groups[noteKey]) {
-        groups[noteKey] = {
-          note: noteKey,
-          transactions: [],
-          created_date: t.created_date
-        };
-      }
-      groups[noteKey].transactions.push(t);
-    });
-    
-    // Ordena grupos pela data de criação mais recente
-    const sortedGroups = Object.values(groups).sort((a, b) => {
-      // created_date is a string, convert to Date objects for comparison
-      return new Date(b.created_date).getTime() - new Date(a.created_date).getTime();
-    });
-    
-    if (sortedGroups.length === 0) return null;
-    
-    const latestGroup = sortedGroups[0];
-    
-    // Extrai data de forma mais flexível
-    let displayDate = 'data desconhecida';
-    const dateMatch = latestGroup.note.match(/(\d{2}\/\d{2}\/\d{4})/);
-    if (dateMatch) {
-      displayDate = dateMatch[1];
-    }
-    
-    return {
-      note: latestGroup.note,
-      date: displayDate,
-      count: latestGroup.transactions.length,
-      transactions: latestGroup.transactions
-    };
-  }, [transactions]);
-
   const createMutation = useMutation({
-    mutationFn: (data) => base44.entities.Transaction.create(data),
+    mutationFn: async (data) => {
+      const { data: result, error } = await supabase
+        .from('transactions')
+        .insert(data)
+        .select()
+        .single();
+      if (error) throw error;
+      return result;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
       setOpen(false);
@@ -144,44 +102,22 @@ export default function Transactions() {
         amount: "",
         type: "expense",
         category: "",
-        payment_method: "pix",
         notes: "",
-        recurring: false
       });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Transaction.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    },
-  });
-
-  const undoImportMutation = useMutation({
-    mutationFn: async (transactionIds) => {
-      console.log('Deletando transações:', transactionIds);
-      
-      // Deleta uma por uma para garantir que todas sejam deletadas
-      for (const id of transactionIds) {
-        try {
-          await base44.entities.Transaction.delete(id);
-          console.log('Deletada:', id);
-        } catch (error) {
-          console.error('Erro ao deletar transação:', id, error);
-          // Decide whether to throw or continue. For undo, it's probably better to try to delete all.
-        }
-      }
+    mutationFn: async (id) => {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      setUndoDialogOpen(false);
-      alert('✅ Importação desfeita com sucesso!');
     },
-    onError: (error) => {
-      console.error('Erro ao desfazer importação:', error);
-      alert('❌ Erro ao desfazer importação. Tente novamente.');
-    }
   });
 
   const handleSubmit = (e) => {
@@ -191,14 +127,6 @@ export default function Transactions() {
       ...formData,
       amount: formData.type === 'expense' ? -Math.abs(amount) : Math.abs(amount)
     });
-  };
-
-  const handleUndoImport = () => {
-    if (lastImport) {
-      const ids = lastImport.transactions.map(t => t.id);
-      console.log('IDs para deletar:', ids);
-      undoImportMutation.mutate(ids);
-    }
   };
 
   const incomeCategories = [
@@ -237,152 +165,103 @@ export default function Transactions() {
           <p className="text-slate-600">Gerencie todas as movimentações financeiras</p>
         </div>
         
-        <div className="flex gap-3 flex-wrap">
-          {lastImport && (
-            <Button 
-              variant="outline" 
-              className="text-orange-600 border-orange-300 hover:bg-orange-50"
-              onClick={() => setUndoDialogOpen(true)}
-            >
-              <Undo2 className="w-4 h-4 mr-2" />
-              Desfazer Última Importação
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-600 hover:bg-blue-700">
+              <Plus className="w-4 h-4 mr-2" />
+              Nova Transação
             </Button>
-          )}
-          
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-blue-600 hover:bg-blue-700">
-                <Plus className="w-4 h-4 mr-2" />
-                Nova Transação
+          </DialogTrigger>
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Adicionar Transação</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Data</Label>
+                <Input
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Tipo</Label>
+                <Select
+                  value={formData.type}
+                  onValueChange={(value) => setFormData({ ...formData, type: value, category: "" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="income">Receita</SelectItem>
+                    <SelectItem value="expense">Despesa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Categoria</Label>
+                <Select
+                  value={formData.category}
+                  onValueChange={(value) => setFormData({ ...formData, category: value })}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(formData.type === 'income' ? incomeCategories : expenseCategories).map(cat => (
+                      <SelectItem key={cat.value} value={cat.value}>
+                        {cat.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Descrição</Label>
+                <Input
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Ex: Venda de produto X"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Valor (R$)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={formData.amount}
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Observações</Label>
+                <Textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Informações adicionais..."
+                  rows={3}
+                />
+              </div>
+
+              <Button type="submit" className="w-full" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Salvando..." : "Salvar Transação"}
               </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Adicionar Transação</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Data</Label>
-                  <Input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Tipo</Label>
-                  <Select
-                    value={formData.type}
-                    onValueChange={(value) => setFormData({ ...formData, type: value, category: "" })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="income">Receita</SelectItem>
-                      <SelectItem value="expense">Despesa</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Categoria</Label>
-                  <Select
-                    value={formData.category}
-                    onValueChange={(value) => setFormData({ ...formData, category: value })}
-                    required
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(formData.type === 'income' ? incomeCategories : expenseCategories).map(cat => (
-                        <SelectItem key={cat.value} value={cat.value}>
-                          {cat.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Descrição</Label>
-                  <Input
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="Ex: Venda de produto X"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Valor (R$)</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    placeholder="0.00"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Forma de Pagamento</Label>
-                  <Select
-                    value={formData.payment_method}
-                    onValueChange={(value) => setFormData({ ...formData, payment_method: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pix">PIX</SelectItem>
-                      <SelectItem value="dinheiro">Dinheiro</SelectItem>
-                      <SelectItem value="cartao_credito">Cartão de Crédito</SelectItem>
-                      <SelectItem value="cartao_debito">Cartão de Débito</SelectItem>
-                      <SelectItem value="transferencia">Transferência</SelectItem>
-                      <SelectItem value="boleto">Boleto</SelectItem>
-                      <SelectItem value="cheque">Cheque</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Observações</Label>
-                  <Textarea
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Informações adicionais..."
-                    rows={3}
-                  />
-                </div>
-
-                <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-                  {createMutation.isPending ? "Salvando..." : "Salvar Transação"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
-
-      {/* Alerta sobre última importação */}
-      {lastImport && (
-        <Alert className="border-orange-200 bg-orange-50">
-          <AlertCircle className="h-4 w-4 text-orange-600" />
-          <AlertDescription className="text-orange-900">
-            <strong>Última importação:</strong> {lastImport.count} transações importadas em {lastImport.date}. 
-            Use o botão "Desfazer" acima se esta importação estiver incorreta.
-            <br />
-            <span className="text-xs text-orange-700 mt-1 block">
-              Nota: "{lastImport.note.substring(0, 50)}{lastImport.note.length > 50 ? '...' : ''}"
-            </span>
-          </AlertDescription>
-        </Alert>
-      )}
 
       {/* Filtros */}
       <Card className="p-4">
@@ -439,7 +318,7 @@ export default function Transactions() {
                   <TableCell className="font-medium">{transaction.description}</TableCell>
                   <TableCell>
                     <Badge variant="outline" className="text-xs">
-                      {CATEGORY_NAMES[transaction.category]}
+                      {CATEGORY_NAMES[transaction.category] || transaction.category}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -472,47 +351,17 @@ export default function Transactions() {
                   </TableCell>
                 </TableRow>
               ))}
+              {filteredTransactions.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-slate-500">
+                    Nenhuma transação encontrada
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
-          {filteredTransactions.length === 0 && (
-            <div className="text-center py-12 text-slate-500">
-              Nenhuma transação encontrada
-            </div>
-          )}
         </div>
       </Card>
-
-      {/* Dialog de confirmação para desfazer importação */}
-      <Dialog open={undoDialogOpen} onOpenChange={setUndoDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Desfazer Última Importação?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              Esta ação irá <strong>excluir permanentemente {lastImport?.count} transações</strong> importadas em {lastImport?.date}.
-            </p>
-            <Alert className="border-orange-200 bg-orange-50">
-              <AlertCircle className="h-4 w-4 text-orange-600" />
-              <AlertDescription className="text-orange-900 text-sm">
-                <strong>Atenção:</strong> Esta ação não pode ser desfeita!
-              </AlertDescription>
-            </Alert>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setUndoDialogOpen(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              variant="destructive" 
-              onClick={handleUndoImport}
-              disabled={undoImportMutation.isPending}
-            >
-              {undoImportMutation.isPending ? "Excluindo..." : "Sim, Excluir Todas"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
