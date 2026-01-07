@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { componentTagger } from "lovable-tagger"
 import { visualEditPlugin } from './vite-plugins/visual-edit-plugin.js'
 import { errorOverlayPlugin } from './vite-plugins/error-overlay-plugin.js'
 
@@ -10,6 +11,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       mode === 'development' && visualEditPlugin(),
       react(),
+      mode === 'development' && componentTagger(),
       errorOverlayPlugin(),
       {
         name: 'iframe-hmr',
