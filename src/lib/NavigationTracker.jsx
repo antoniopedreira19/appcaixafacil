@@ -1,14 +1,26 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from './AuthContext';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/integrations/supabase/client';
 import { pagesConfig } from '@/pages.config';
 
 export default function NavigationTracker() {
     const location = useLocation();
-    const { isAuthenticated } = useAuth();
+    const [user, setUser] = useState(null);
     const { Pages, mainPage } = pagesConfig;
     const mainPageKey = mainPage ?? Object.keys(Pages)[0];
+
+    // Check auth state
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            setUser(user);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
 
     // Post navigation changes to parent window
     useEffect(() => {
@@ -18,33 +30,27 @@ export default function NavigationTracker() {
         }, '*');
     }, [location]);
 
-    // Log user activity when navigating to a page
+    // Log page view (optional - only if you have a logging table)
     useEffect(() => {
-        // Extract page name from pathname
         const pathname = location.pathname;
         let pageName;
         
         if (pathname === '/' || pathname === '') {
             pageName = mainPageKey;
         } else {
-            // Remove leading slash and get the first segment
             const pathSegment = pathname.replace(/^\//, '').split('/')[0];
-            
-            // Try case-insensitive lookup in Pages config
             const pageKeys = Object.keys(Pages);
             const matchedKey = pageKeys.find(
                 key => key.toLowerCase() === pathSegment.toLowerCase()
             );
-            
             pageName = matchedKey || null;
         }
 
-        if (isAuthenticated && pageName) {
-            base44.appLogs.logUserInApp(pageName).catch(() => {
-                // Silently fail - logging shouldn't break the app
-            });
+        // Navigation tracking - can be extended later if needed
+        if (user && pageName) {
+            console.log(`[NavigationTracker] User ${user.id} viewed page: ${pageName}`);
         }
-    }, [location, isAuthenticated, Pages, mainPageKey]);
+    }, [location, user, Pages, mainPageKey]);
 
     return null;
 }
