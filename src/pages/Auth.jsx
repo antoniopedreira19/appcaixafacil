@@ -44,6 +44,7 @@ export default function Auth() {
         title: "Erro",
         description: "Por favor, preencha todos os campos.",
         variant: "destructive",
+        duration: 3000,
       });
       return;
     }
@@ -67,11 +68,13 @@ export default function Auth() {
         title: "Erro no login",
         description: errorMessage,
         variant: "destructive",
+        duration: 3000,
       });
     } else {
       toast({
         title: "Bem-vindo!",
         description: "Login realizado com sucesso.",
+        duration: 3000,
       });
     }
     
@@ -86,6 +89,7 @@ export default function Auth() {
         title: "Erro",
         description: "Por favor, preencha todos os campos.",
         variant: "destructive",
+        duration: 3000,
       });
       return;
     }
@@ -95,6 +99,7 @@ export default function Auth() {
         title: "Erro",
         description: "A senha deve ter pelo menos 6 caracteres.",
         variant: "destructive",
+        duration: 3000,
       });
       return;
     }
@@ -121,11 +126,13 @@ export default function Auth() {
         title: "Erro no cadastro",
         description: errorMessage,
         variant: "destructive",
+        duration: 3000,
       });
     } else {
       toast({
         title: "Conta criada!",
         description: "Verifique seu email para confirmar o cadastro, ou faça login se a confirmação estiver desabilitada.",
+        duration: 3000,
       });
     }
     
